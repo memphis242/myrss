@@ -360,12 +360,12 @@ fn draw_help(f: &mut Frame, area: Rect, app: &mut AppImpl) {
     let mut text = String::new();
     match app.selected {
         Selected::Feeds => {
-            text.push_str("r - refresh selected feed; x - refresh all feeds\n");
-            text.push_str("c - copy link; o - open link in browser\n")
+            text.push_str("gg/G - snap top/bottom; r - refresh; x - refresh all\n");
+            text.push_str("c - copy link; o - open browser; : - command mode\n");
         }
         _ => {
-            text.push_str("r - mark entry read/un; a - toggle view read/un\n");
-            text.push_str("c - copy link; o - open link in browser\n")
+            text.push_str("gg/G - snap top/bottom; r - toggle read; a - toggle read/unread\n");
+            text.push_str("M - noteworthy; O - view text; : - command mode\n");
         }
     }
     match app.mode {
