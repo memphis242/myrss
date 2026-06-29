@@ -8,6 +8,23 @@ Russ is a TUI RSS/Atom reader with vim-like controls and a local-first, offline-
 
 ---
 
+## Quick Start: Build, Install, and Run
+
+To compile, install the custom TUI reader into your local bin directory (`~/.local/bin/`), and run it:
+
+1. **Build and Install**:
+   ```console
+   $ cargo install --path . --root ~/.local
+   ```
+   *Make sure `~/.local/bin` is in your `$PATH` environment variable.*
+
+2. **Run**:
+   ```console
+   $ ~/.local/bin/russ read
+   ```
+
+---
+
 ![](entries.png)
 ![](entry.png)
 
