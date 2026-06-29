@@ -228,6 +228,7 @@ pub struct EntryMetadata {
     pub read_at: Option<chrono::DateTime<Utc>>,
     pub inserted_at: chrono::DateTime<Utc>,
     pub noteworthy: bool,
+    pub newly_added: bool,
     // unused:
     // pub updated_at: chrono::DateTime<Utc>,
 }
@@ -548,6 +549,15 @@ pub fn initialize_db(conn: &mut rusqlite::Connection) -> Result<()> {
             )?;
         }
 
+        if schema_version <= 4 {
+            tx.pragma_update(None, "user_version", 5)?;
+
+            tx.execute(
+                "ALTER TABLE entries ADD COLUMN newly_added INTEGER DEFAULT 1",
+                [],
+            )?;
+        }
+
         Ok(())
     })
 }
@@ -731,7 +741,8 @@ pub fn get_entry_meta(conn: &rusqlite::Connection, entry_id: EntryId) -> Result<
           link,
           read_at,
           inserted_at,
-          noteworthy
+          noteworthy,
+          newly_added
           -- updated_at
         FROM entries WHERE id=?1",
         [entry_id],
@@ -746,7 +757,8 @@ pub fn get_entry_meta(conn: &rusqlite::Connection, entry_id: EntryId) -> Result<
                 read_at: row.get(5)?,
                 inserted_at: row.get(6)?,
                 noteworthy: row.get::<_, i32>(7)? != 0,
-                // updated_at: row.get(8)?,
+                newly_added: row.get::<_, i32>(8)? != 0,
+                // updated_at: row.get(9)?,
             })
         },
     )?;
@@ -791,7 +803,8 @@ pub fn get_entries_metas(
         link,
         read_at,
         inserted_at,
-        noteworthy
+        noteworthy,
+        newly_added
         -- updated_at
         FROM entries 
         WHERE feed_id=?1"
@@ -814,14 +827,23 @@ pub fn get_entries_metas(
             read_at: row.get(5)?,
             inserted_at: row.get(6)?,
             noteworthy: row.get::<_, i32>(7)? != 0,
+            newly_added: row.get::<_, i32>(8)? != 0,
             // unused:
-            // updated_at: row.get(8)?,
+            // updated_at: row.get(9)?,
         })
     })? {
         entries.push(entry?)
     }
 
     Ok(entries)
+}
+
+pub fn clear_newly_added_for_feed(conn: &rusqlite::Connection, feed_id: FeedId) -> Result<()> {
+    conn.execute(
+        "UPDATE entries SET newly_added = 0 WHERE feed_id = ?1",
+        [feed_id],
+    )?;
+    Ok(())
 }
 
 pub fn get_entries_links(

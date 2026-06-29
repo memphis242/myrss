@@ -424,7 +424,7 @@ fn get_action(app: &App, event: Event<KeyEvent>) -> Option<Action> {
 
 fn update(app: &mut App, action: Action) -> Result<()> {
     match action {
-        Action::Tick => (),
+        Action::Tick => app.tick()?,
         Action::Quit => app.set_should_quit(true),
         Action::RefreshAll => app.refresh_feeds()?,
         Action::RefreshFeed => app.refresh_feed()?,

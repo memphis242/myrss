@@ -381,12 +381,28 @@ fn draw_entries(f: &mut Frame, area: Rect, app: &mut AppImpl) {
         .iter()
         .map(|entry| {
             let title = entry.title.as_ref().map_or("No title", |t| t.as_str());
-            if entry.noteworthy {
-                let styled_title = format!("★ {title}");
-                ListItem::new(Span::styled(styled_title, Style::default().fg(Color::Yellow)))
+            let style = if entry.newly_added {
+                let is_bright = (app.tick_count / 2) % 2 == 0;
+                let show_underline = app.tick_count % 2 == 0;
+                let color = if is_bright { Color::LightMagenta } else { Color::Magenta };
+                let mut s = Style::default().fg(color).add_modifier(Modifier::BOLD);
+                if show_underline {
+                    s = s.add_modifier(Modifier::UNDERLINED);
+                }
+                s
+            } else if entry.noteworthy {
+                Style::default().fg(Color::Yellow)
             } else {
-                ListItem::new(Span::raw(title.to_string()))
-            }
+                Style::default()
+            };
+
+            let styled_title = if entry.noteworthy {
+                format!("★ {title}")
+            } else {
+                title.to_string()
+            };
+
+            ListItem::new(Span::styled(styled_title, style))
         })
         .collect::<Vec<ListItem>>();
 

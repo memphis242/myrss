@@ -158,6 +158,13 @@ impl App {
         Ok(())
     }
 
+    pub fn tick(&self) -> Result<()> {
+        let mut inner = self.inner.lock().unwrap();
+        inner.tick_count = inner.tick_count.wrapping_add(1);
+        Ok(())
+    }
+
+
     pub fn draw(&self, terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>) -> Result<()> {
         let mut inner = self.inner.lock().unwrap();
 
@@ -277,6 +284,7 @@ pub struct AppImpl {
     pub g_pressed_at: Option<std::time::Instant>,
     pub command_input: String,
     pub current_summary: Option<String>,
+    pub tick_count: u32,
 }
 
 impl AppImpl {
@@ -293,6 +301,7 @@ impl AppImpl {
             .build();
 
         crate::rss::initialize_db(&mut conn)?;
+        conn.execute("UPDATE entries SET newly_added = 0", [])?;
         let feeds: util::StatefulList<crate::rss::Feed> = vec![].into();
         let entries: util::StatefulList<crate::rss::EntryMetadata> = vec![].into();
         // default to having nothing selected,
@@ -330,6 +339,7 @@ impl AppImpl {
             g_pressed_at: None,
             command_input: String::new(),
             current_summary: None,
+            tick_count: 0,
         };
 
         app.update_feeds()?;
@@ -387,6 +397,8 @@ impl AppImpl {
     }
 
     fn update_current_feed(&mut self) -> Result<()> {
+        let prev_feed_id = self.current_feed.as_ref().map(|f| f.id);
+
         self.current_feed = if self.feeds.items.is_empty() {
             self.selected = Selected::None;
             None
@@ -401,6 +413,13 @@ impl AppImpl {
             let feed_id = self.feeds.items[selected_idx].id;
             Some(crate::rss::get_feed(&self.conn, feed_id)?)
         };
+
+        let new_feed_id = self.current_feed.as_ref().map(|f| f.id);
+        if prev_feed_id != new_feed_id {
+            if let Some(prev_id) = prev_feed_id {
+                crate::rss::clear_newly_added_for_feed(&self.conn, prev_id)?;
+            }
+        }
 
         Ok(())
     }
