@@ -487,11 +487,11 @@ fn parse_testimonies(html: &str) -> Vec<String> {
                 }
 
                 let formatted = format!(
-                    "--------------------------------------------------------------------------------\n\
+                    "\n--------------------------------------------------------------------------------\n\
                      Logo: {}\n\
                      Author: {}\n\
                      Quote: {}\n\
-                     --------------------------------------------------------------------------------",
+                     --------------------------------------------------------------------------------\n",
                     logo_brand, author, quote
                 );
                 testimonies.push(formatted);
@@ -537,7 +537,7 @@ fn clean_rich_text_block(block: &str) -> String {
                     if let Some(end_h2_open) = rest.find('>') {
                         if let Some(end_h2) = rest.find("</h2>") {
                             let text = &rest[end_h2_open + 1..end_h2];
-                            result.push_str(&format!("## {}\n", clean_html_tags(text)));
+                            result.push_str(&format!("\n## {}\n\n", clean_html_tags(text)));
                             current = &rest[end_h2 + 5..];
                             continue;
                         }
@@ -547,7 +547,7 @@ fn clean_rich_text_block(block: &str) -> String {
                     if let Some(end_h3_open) = rest.find('>') {
                         if let Some(end_h3) = rest.find("</h3>") {
                             let text = &rest[end_h3_open + 1..end_h3];
-                            result.push_str(&format!("### {}\n", clean_html_tags(text)));
+                            result.push_str(&format!("\n### {}\n\n", clean_html_tags(text)));
                             current = &rest[end_h3 + 5..];
                             continue;
                         }
