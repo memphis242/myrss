@@ -7,6 +7,8 @@ This file outlines the rules and guidelines for this workspace.
 - **Focused Commits**: Always make small, logically focused commits rather than mega-commits. This makes revision history easy to parse.
 - **Testing**: Always run `cargo test` after code changes to ensure everything compiles and passes all unit tests.
 - **Pause for Verification**: For any user-facing changes (UI adjustments, new keybindings, visual states), **pause after implementation and your own testing** so that the user can verify the results. Do not rush to the next feature without explicit user feedback.
+- **Regression Testing**: Always write automated regression tests for any bug findings reported by the agent or the user. Place/move tests into the distinct `tests/` directory as integration tests where applicable, or as unit tests within the relevant module.
+
 
 ## Implementation Details
 
