@@ -299,10 +299,10 @@ pub fn extract_main_article_content(html: &str) -> String {
 
     // 2. Try to find the main article container
     if let Some(content) = extract_by_tag(&html, "article") {
-        return content;
+        return clean_rich_text_block(&content, false);
     }
     if let Some(content) = extract_by_tag(&html, "main") {
-        return content;
+        return clean_rich_text_block(&content, false);
     }
 
 fn scrape_claude_blog(html: &str) -> Option<String> {
@@ -531,6 +531,16 @@ fn clean_rich_text_block(block: &str, skip_first_p: bool) -> String {
         match next_tag {
             Some(pos) => {
                 let rest = &current[pos..];
+                if rest.starts_with("<h1") {
+                    if let Some(end_h1_open) = rest.find('>') {
+                        if let Some(end_h1) = rest.find("</h1>") {
+                            let text = &rest[end_h1_open + 1..end_h1];
+                            result.push_str(&format!("# {}<br/><br/>", clean_html_tags(text)));
+                            current = &rest[end_h1 + 5..];
+                            continue;
+                        }
+                    }
+                }
                 if rest.starts_with("<h2") {
                     if let Some(end_h2_open) = rest.find('>') {
                         if let Some(end_h2) = rest.find("</h2>") {
@@ -681,12 +691,12 @@ fn extract_all_by_tag(html: &str, tag_name: &str) -> Vec<String> {
     // Try common div ids and classes
     for identifier in &["id=\"content\"", "id=\"article\"", "id=\"main\"", "class=\"post-content\"", "class=\"article-content\"", "class=\"entry-content\""] {
         if let Some(content) = extract_by_div_identifier(&html, identifier) {
-            return content;
+            return clean_rich_text_block(&content, false);
         }
     }
 
     // Fallback: return the cleaned HTML (with script/style/nav stripped)
-    html
+    clean_rich_text_block(&html, false)
 }
 
 fn strip_tags(html: &str, tag_name: &str) -> String {
