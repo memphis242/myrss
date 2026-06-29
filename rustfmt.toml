@@ -1,0 +1,4 @@
+# Pin the edition so `rustfmt` invoked directly (editors, pre-commit) matches
+# `cargo fmt`, which reads it from Cargo.toml. All other settings are stable
+# rustfmt defaults — keep them so formatting stays reproducible in CI.
+edition = "2024"
