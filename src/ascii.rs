@@ -253,9 +253,141 @@ pub fn render_article_with_ascii_images(
     rendered_text
 }
 
+/// Cleanses the input HTML page by removing nav, header, footer, script, and style blocks,
+/// then attempts to locate and extract the main article container (e.g. `<article>`, `<main>`, or divs with article ids/classes).
+pub fn extract_main_article_content(html: &str) -> String {
+    // 1. Strip out scripts, style sheets, headers, footers, navs to clean it up.
+    let html = strip_tags(html, "script");
+    let html = strip_tags(&html, "style");
+    let html = strip_tags(&html, "header");
+    let html = strip_tags(&html, "footer");
+    let html = strip_tags(&html, "nav");
+    let html = strip_tags(&html, "aside");
+
+    // 2. Try to find the main article container
+    if let Some(content) = extract_by_tag(&html, "article") {
+        return content;
+    }
+    if let Some(content) = extract_by_tag(&html, "main") {
+        return content;
+    }
+
+    // Try common div ids and classes
+    for identifier in &["id=\"content\"", "id=\"article\"", "id=\"main\"", "class=\"post-content\"", "class=\"article-content\"", "class=\"entry-content\""] {
+        if let Some(content) = extract_by_div_identifier(&html, identifier) {
+            return content;
+        }
+    }
+
+    // Fallback: return the cleaned HTML (with script/style/nav stripped)
+    html
+}
+
+fn strip_tags(html: &str, tag_name: &str) -> String {
+    let open_tag = format!("<{}", tag_name);
+    let close_tag = format!("</{}", tag_name);
+    let mut result = String::new();
+    let mut current = html;
+
+    while let Some(start_pos) = current.to_lowercase().find(&open_tag) {
+        let rest = &current[start_pos..];
+        let end_open_pos = match rest.find('>') {
+            Some(p) => start_pos + p + 1,
+            None => break,
+        };
+
+        result.push_str(&current[..start_pos]);
+
+        if let Some(end_pos) = current[end_open_pos..].to_lowercase().find(&close_tag) {
+            current = &current[end_open_pos + end_pos + close_tag.len() + 1..];
+        } else {
+            current = "";
+            break;
+        }
+    }
+    result.push_str(current);
+    result
+}
+
+fn extract_by_tag(html: &str, tag_name: &str) -> Option<String> {
+    let open_tag = format!("<{}", tag_name);
+    let close_tag = format!("</{}", tag_name);
+    
+    if let Some(start_pos) = html.to_lowercase().find(&open_tag) {
+        let rest = &html[start_pos..];
+        let end_open = match rest.find('>') {
+            Some(p) => start_pos + p + 1,
+            None => return None,
+        };
+        if let Some(end_pos) = html[end_open..].to_lowercase().find(&close_tag) {
+            return Some(html[end_open..end_open + end_pos].to_string());
+        }
+    }
+    None
+}
+
+fn extract_by_div_identifier(html: &str, identifier: &str) -> Option<String> {
+    if let Some(idx) = html.to_lowercase().find(identifier) {
+        let prefix = &html[..idx];
+        if let Some(div_start) = prefix.to_lowercase().rfind("<div") {
+            let rest = &html[div_start..];
+            let end_open = match rest.find('>') {
+                Some(p) => div_start + p + 1,
+                None => return None,
+            };
+            
+            let mut depth = 1;
+            let mut current = end_open;
+            
+            while depth > 0 && current < html.len() {
+                let rest_str = &html[current..];
+                let next_open = rest_str.to_lowercase().find("<div");
+                let next_close = rest_str.to_lowercase().find("</div>");
+                
+                match (next_open, next_close) {
+                    (Some(o), Some(c)) => {
+                        if o < c {
+                            depth += 1;
+                            current += o + 4;
+                        } else {
+                            depth -= 1;
+                            current += c + 6;
+                        }
+                    }
+                    (None, Some(c)) => {
+                        depth -= 1;
+                        current += c + 6;
+                    }
+                    _ => break,
+                }
+            }
+            
+            if depth == 0 {
+                return Some(html[end_open..current - 6].to_string());
+            }
+        }
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_extract_main_article_content() {
+        let raw_html = "<html><head><style>body { color: black; }</style></head>\
+            <body><nav><a href='/'>Home</a></nav>\
+            <header>My Website</header>\
+            <article><h1>My Title</h1><p>This is the main article content.</p></article>\
+            <footer>Footer text</footer></body></html>";
+        
+        let cleaned = extract_main_article_content(raw_html);
+        assert!(cleaned.contains("My Title"));
+        assert!(cleaned.contains("This is the main article content."));
+        assert!(!cleaned.contains("Home"));
+        assert!(!cleaned.contains("Footer text"));
+    }
 
     #[test]
     fn test_extract_image_urls() {

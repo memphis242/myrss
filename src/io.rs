@@ -122,17 +122,38 @@ pub(crate) fn io_loop(
                 match crate::rss::get_entry_content(&conn, entry_id) {
                     Ok(entry_content) => {
                         let empty_string = String::from("No content or description tag provided.");
-                        let html = entry_content
+                        let mut html = entry_content
                             .content
                             .as_ref()
                             .or(entry_content.description.as_ref())
-                            .unwrap_or(&empty_string);
+                            .unwrap_or(&empty_string)
+                            .clone();
+
+                        if let Ok(entry_meta) = crate::rss::get_entry_meta(&conn, entry_id) {
+                            if let Some(link) = &entry_meta.link {
+                                if crate::ascii::is_safe_url(link) {
+                                    app.set_flash("Fetching full article content...".to_string());
+                                    let _ = app.force_redraw();
+
+                                    let client = app.http_client();
+                                    if let Ok(resp) = client.get(link).call() {
+                                        if let Ok(resp_body) = resp.into_string() {
+                                            let cleaned_html = crate::ascii::extract_main_article_content(&resp_body);
+                                            if !cleaned_html.trim().is_empty() {
+                                                html = cleaned_html;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
 
                         let http_client = app.http_client();
-                        let rendered_text = crate::ascii::render_article_with_ascii_images(&http_client, html, target_width);
+                        let rendered_text = crate::ascii::render_article_with_ascii_images(&http_client, &html, target_width);
 
                         if let Ok(entry_meta) = crate::rss::get_entry_meta(&conn, entry_id) {
                             app.set_entry_ascii_content(rendered_text, entry_meta);
+                            app.clear_flash();
                             app.force_redraw()?;
                         }
                     }
@@ -150,11 +171,28 @@ pub(crate) fn io_loop(
                 match crate::rss::get_entry_content(&conn, entry_id) {
                     Ok(entry_content) => {
                         let empty_string = String::from("No content or description tag provided.");
-                        let html = entry_content
+                        let mut html = entry_content
                             .content
                             .as_ref()
                             .or(entry_content.description.as_ref())
-                            .unwrap_or(&empty_string);
+                            .unwrap_or(&empty_string)
+                            .clone();
+
+                        if let Ok(entry_meta) = crate::rss::get_entry_meta(&conn, entry_id) {
+                            if let Some(link) = &entry_meta.link {
+                                if crate::ascii::is_safe_url(link) {
+                                    let client = app.http_client();
+                                    if let Ok(resp) = client.get(link).call() {
+                                        if let Ok(resp_body) = resp.into_string() {
+                                            let cleaned_html = crate::ascii::extract_main_article_content(&resp_body);
+                                            if !cleaned_html.trim().is_empty() {
+                                                html = cleaned_html;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
 
                         let text = match html2text::from_read(html.as_bytes(), 80) {
                             Ok(t) => t,
