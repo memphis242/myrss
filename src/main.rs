@@ -18,6 +18,7 @@ use std::sync::mpsc;
 use std::{thread, time};
 
 mod app;
+mod ascii;
 mod io;
 mod modes;
 mod opml;
@@ -282,6 +283,7 @@ enum Action {
     SnapToTop,
     SnapToBottom,
     ToggleNoteworthy,
+    OpenArticleWithAscii,
 }
 
 fn get_action(app: &App, event: Event<KeyEvent>) -> Option<Action> {
@@ -340,6 +342,7 @@ fn get_action(app: &App, event: Event<KeyEvent>) -> Option<Action> {
                             }
                             (KeyCode::Char('c'), _) => Some(Action::CopyLinkToClipboard),
                             (KeyCode::Char('o'), _) => Some(Action::OpenLinkInBrowser),
+                            (KeyCode::Char('O'), _) => Some(Action::OpenArticleWithAscii),
                             (KeyCode::Char('G'), _) => Some(Action::SnapToBottom),
                             (KeyCode::Char('M'), _) => Some(Action::ToggleNoteworthy),
                             _ => None,
@@ -401,6 +404,11 @@ fn update(app: &mut App, action: Action) -> Result<()> {
         Action::SnapToTop => app.on_snap_to_top()?,
         Action::SnapToBottom => app.on_snap_to_bottom()?,
         Action::ToggleNoteworthy => app.toggle_noteworthy()?,
+        Action::OpenArticleWithAscii => {
+            if app.has_entries() && app.has_current_entry() {
+                app.open_current_article_with_ascii()?;
+            }
+        }
     };
 
     Ok(())

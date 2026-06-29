@@ -100,6 +100,25 @@ impl App {
         inner.g_pressed_at = None;
     }
 
+    pub fn set_entry_ascii_content(&self, text: String, entry_meta: crate::rss::EntryMetadata) {
+        let mut inner = self.inner.lock().unwrap();
+        inner.current_entry_text = text;
+        inner.entry_lines_len = inner.current_entry_text.matches('\n').count();
+        inner.entry_scroll_position = 0;
+        inner.selected = Selected::Entry(entry_meta);
+        inner.flash = None;
+    }
+
+    pub(crate) fn open_current_article_with_ascii(&self) -> Result<()> {
+        let inner = self.inner.lock().unwrap();
+        if let Some(entry_meta) = &inner.current_entry_meta {
+            let entry_id = entry_meta.id;
+            let width = inner.entry_column_width;
+            inner.io_tx.send(crate::io::Action::RenderAsciiArticle(entry_id, width as u32))?;
+        }
+        Ok(())
+    }
+
     pub fn draw(&self, terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>) -> Result<()> {
         let mut inner = self.inner.lock().unwrap();
 

@@ -11,6 +11,7 @@ pub(crate) enum Action {
     RefreshFeeds(Vec<crate::rss::FeedId>),
     SubscribeToFeed(String),
     ClearFlash,
+    RenderAsciiArticle(crate::rss::EntryId, u32),
 }
 
 /// A loop to process `io::Action` messages.
@@ -113,6 +114,31 @@ pub(crate) fn io_loop(
             }
             Action::ClearFlash => {
                 app.clear_flash();
+            }
+            Action::RenderAsciiArticle(entry_id, target_width) => {
+                let conn = connection_pool.get()?;
+                match crate::rss::get_entry_content(&conn, entry_id) {
+                    Ok(entry_content) => {
+                        let empty_string = String::from("No content or description tag provided.");
+                        let html = entry_content
+                            .content
+                            .as_ref()
+                            .or(entry_content.description.as_ref())
+                            .unwrap_or(&empty_string);
+
+                        let http_client = app.http_client();
+                        let rendered_text = crate::ascii::render_article_with_ascii_images(&http_client, html, target_width);
+
+                        if let Ok(entry_meta) = crate::rss::get_entry_meta(&conn, entry_id) {
+                            app.set_entry_ascii_content(rendered_text, entry_meta);
+                            app.force_redraw()?;
+                        }
+                    }
+                    Err(e) => {
+                        app.push_error_flash(e);
+                        app.force_redraw()?;
+                    }
+                }
             }
         }
     }
