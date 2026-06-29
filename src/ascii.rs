@@ -333,20 +333,20 @@ fn scrape_claude_blog(html: &str) -> Option<String> {
 
     // Build the formatted header
     let mut output = String::new();
-    output.push_str(&format!("# {}\n\n", title));
-    output.push_str(&format!("Category: {}  |  Product: {}  |  Date: {}  |  Reading Time: {}\n", category, product, date, reading_time));
-    output.push_str("================================================================================\n\n");
+    output.push_str(&format!("# {}<br/><br/>", title));
+    output.push_str(&format!("Category: {}  |  Product: {}  |  Date: {}  |  Reading Time: {}<br/>", category, product, date, reading_time));
+    output.push_str("================================================================================<br/><br/>");
 
     // Extract Primary Content first paragraph
     let p1 = "Starting today, Claude models are generally available in Microsoft Foundry, hosted on Azure. Claude runs in your Azure environment with the authentication, billing, and governance controls your teams already use. You can choose where inference is processed, including a US data zone for teams with data residency requirements. Anthropic operates the inference and is the data processor.";
-    output.push_str(&format!("{}\n\n", p1));
+    output.push_str(&format!("{}<br/><br/>", p1));
 
     // Extract and append testimonies
     let testimonies = parse_testimonies(html);
     if !testimonies.is_empty() {
         for t in testimonies {
             output.push_str(&t);
-            output.push_str("\n\n");
+            output.push_str("<br/><br/>");
         }
     }
 
@@ -359,13 +359,13 @@ fn scrape_claude_blog(html: &str) -> Option<String> {
             for p in p_blocks.iter().skip(1) {
                 let cleaned_p = clean_html_tags(p).trim().to_string();
                 if !cleaned_p.is_empty() {
-                    remaining.push_str(&format!("{}\n\n", cleaned_p));
+                    remaining.push_str(&format!("{}<br/><br/>", cleaned_p));
                 }
             }
         } else {
             let cleaned = clean_rich_text_block(block);
             remaining.push_str(&cleaned);
-            remaining.push_str("\n\n");
+            remaining.push_str("<br/><br/>");
         }
     }
 
@@ -487,11 +487,11 @@ fn parse_testimonies(html: &str) -> Vec<String> {
                 }
 
                 let formatted = format!(
-                    "\n--------------------------------------------------------------------------------\n\
-                     Logo: {}\n\
-                     Author: {}\n\
-                     Quote: {}\n\
-                     --------------------------------------------------------------------------------\n",
+                    "<br/><br/>--------------------------------------------------------------------------------<br/>\
+                     Logo: {}<br/>\
+                     Author: {}<br/>\
+                     Quote: {}<br/>\
+                     --------------------------------------------------------------------------------<br/><br/>",
                     logo_brand, author, quote
                 );
                 testimonies.push(formatted);
@@ -537,7 +537,7 @@ fn clean_rich_text_block(block: &str) -> String {
                     if let Some(end_h2_open) = rest.find('>') {
                         if let Some(end_h2) = rest.find("</h2>") {
                             let text = &rest[end_h2_open + 1..end_h2];
-                            result.push_str(&format!("\n## {}\n\n", clean_html_tags(text)));
+                            result.push_str(&format!("<br/><br/>## {}<br/><br/>", clean_html_tags(text)));
                             current = &rest[end_h2 + 5..];
                             continue;
                         }
@@ -547,7 +547,7 @@ fn clean_rich_text_block(block: &str) -> String {
                     if let Some(end_h3_open) = rest.find('>') {
                         if let Some(end_h3) = rest.find("</h3>") {
                             let text = &rest[end_h3_open + 1..end_h3];
-                            result.push_str(&format!("\n### {}\n\n", clean_html_tags(text)));
+                            result.push_str(&format!("<br/><br/>### {}<br/><br/>", clean_html_tags(text)));
                             current = &rest[end_h3 + 5..];
                             continue;
                         }
@@ -559,7 +559,7 @@ fn clean_rich_text_block(block: &str) -> String {
                             let text = &rest[end_p_open + 1..end_p];
                             let cleaned = clean_html_tags(text).trim().to_string();
                             if !cleaned.is_empty() {
-                                result.push_str(&format!("{}\n\n", cleaned));
+                                result.push_str(&format!("{}<br/><br/>", cleaned));
                             }
                             current = &rest[end_p + 4..];
                             continue;
@@ -846,7 +846,9 @@ mod tests {
 
         let html = response.into_string().unwrap();
         let content = extract_main_article_content(&html);
-        println!("DEBUG CONTENT:\n{}", content);
+        let client_dummy = ureq::Agent::new();
+        let rendered = render_article_with_ascii_images(&client_dummy, &content, 80);
+        println!("DEBUG RENDERED CONTENT:\n{}", rendered);
 
         assert!(content.contains("Claude in Microsoft Foundry is now generally available"), "Title not found");
         assert!(content.contains("Product announcements"), "Category not found");
