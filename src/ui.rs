@@ -3,7 +3,7 @@
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
-use ratatui::text::{Span, Text};
+use ratatui::text::{Span, Text, Line};
 use ratatui::widgets::{Block, Borders, LineGauge, List, ListItem, Paragraph, Wrap};
 use std::rc::Rc;
 
@@ -31,16 +31,42 @@ pub fn predraw(f: &Frame, mode: Mode) -> Rc<[Rect]> {
 }
 
 pub fn draw(f: &mut Frame, chunks: Rc<[Rect]>, app: &mut AppImpl) {
-    draw_info_column(f, chunks[0], app);
+    match app.mode {
+        Mode::Settings | Mode::SettingsEditing(_) => {
+            draw_settings(f, f.area(), app);
+        }
+        Mode::ViewLlmLog => {
+            draw_llm_log(f, f.area(), app);
+        }
+        _ => {
+            draw_info_column(f, chunks[0], app);
 
-    match &app.selected {
-        Selected::Feeds | Selected::Entries => {
-            draw_entries(f, chunks[1], app);
+            match &app.selected {
+                Selected::Feeds | Selected::Entries => {
+                    draw_entries(f, chunks[1], app);
+                }
+                Selected::Entry(_entry_meta) => {
+                    draw_entry(f, chunks[1], app);
+                }
+                Selected::None => draw_entries(f, chunks[1], app),
+            }
+
+            if let Some(summary) = &app.current_summary {
+                let size = f.area();
+                let popup_area = centered_rect(70, 75, size);
+
+                let block = Block::default()
+                    .borders(Borders::ALL)
+                    .title(Span::styled(" LLM Summary (Press Esc/q to close) ", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)));
+
+                let summary_paragraph = Paragraph::new(summary.as_str())
+                    .block(block)
+                    .wrap(Wrap { trim: false });
+
+                f.render_widget(ratatui::widgets::Clear, popup_area);
+                f.render_widget(summary_paragraph, popup_area);
+            }
         }
-        Selected::Entry(_entry_meta) => {
-            draw_entry(f, chunks[1], app);
-        }
-        Selected::None => draw_entries(f, chunks[1], app),
     }
 
     if matches!(app.mode, Mode::Command) {
@@ -52,22 +78,6 @@ pub fn draw(f: &mut Frame, chunks: Rc<[Rect]>, app: &mut AppImpl) {
         let cmd_text = format!(":{}", app.command_input);
         let cmd_paragraph = Paragraph::new(cmd_text).style(Style::default().fg(Color::Yellow));
         f.render_widget(cmd_paragraph, bottom_layout[1]);
-    }
-
-    if let Some(summary) = &app.current_summary {
-        let size = f.area();
-        let popup_area = centered_rect(70, 75, size);
-
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .title(Span::styled(" LLM Summary (Press Esc/q to close) ", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)));
-
-        let summary_paragraph = Paragraph::new(summary.as_str())
-            .block(block)
-            .wrap(Wrap { trim: false });
-
-        f.render_widget(ratatui::widgets::Clear, popup_area);
-        f.render_widget(summary_paragraph, popup_area);
     }
 }
 
@@ -99,7 +109,9 @@ fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
 
 fn draw_info_column(f: &mut Frame, area: Rect, app: &mut AppImpl) {
     let mut constraints = match &app.mode {
-        Mode::Normal | Mode::Command => vec![Constraint::Percentage(70), Constraint::Percentage(30)],
+        Mode::Normal | Mode::Command | Mode::Settings | Mode::SettingsEditing(_) | Mode::ViewLlmLog => {
+            vec![Constraint::Percentage(70), Constraint::Percentage(30)]
+        }
         Mode::Editing => vec![
             Constraint::Percentage(60),
             Constraint::Percentage(20),
@@ -349,6 +361,15 @@ fn draw_help(f: &mut Frame, area: Rect, app: &mut AppImpl) {
             text.push_str("Type command and press enter (e.g. summarize)\n");
             text.push_str("esc - normal mode\n")
         }
+        Mode::Settings => {
+            text.push_str("j/k - navigate; enter - edit/toggle; esc - discard & exit\n");
+        }
+        Mode::SettingsEditing(_) => {
+            text.push_str("Type new value; enter - save value; esc - cancel edit\n");
+        }
+        Mode::ViewLlmLog => {
+            text.push_str("j/k - scroll requests; esc/q - close log\n");
+        }
     }
 
     text.push_str("? - show/hide help");
@@ -587,4 +608,151 @@ fn error_text(errors: &[anyhow::Error]) -> String {
         })
         .collect::<Vec<String>>()
         .join("\n")
+}
+
+fn draw_settings(f: &mut Frame, area: Rect, app: &mut AppImpl) {
+    let chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(60), Constraint::Percentage(40)])
+        .split(area);
+
+    let fields_area = chunks[0];
+    let models_area = chunks[1];
+
+    let settings = &app.settings;
+    let focus = match app.mode {
+        Mode::Settings => Some(app.settings_cursor),
+        Mode::SettingsEditing(idx) => Some(idx),
+        _ => None,
+    };
+    let is_editing = matches!(app.mode, Mode::SettingsEditing(_));
+
+    let mut list_items = Vec::new();
+
+    let get_val = |idx: usize, val: &str| -> String {
+        if focus == Some(idx) && is_editing {
+            app.settings_buffer.clone()
+        } else {
+            val.to_string()
+        }
+    };
+
+    let mut make_item = |idx: usize, label: &str, value: String| {
+        let is_selected = focus == Some(idx);
+        let prefix = if is_selected { "> " } else { "  " };
+
+        let label_span = Span::styled(format!("{}{:<30}: ", prefix, label), Style::default().fg(Color::Cyan));
+        let val_style = if is_selected {
+            if is_editing {
+                Style::default().bg(Color::Green).fg(Color::Black).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+            }
+        } else {
+            Style::default().fg(Color::White)
+        };
+        let val_span = Span::styled(value, val_style);
+
+        list_items.push(ListItem::new(Line::from(vec![label_span, val_span])));
+    };
+
+    make_item(0, "1. LLM Enabled (summarize)", if settings.llm_enabled { "Yes [Toggle with Enter]".to_string() } else { "No [Toggle with Enter]".to_string() });
+    make_item(1, "2. API Key Env Var Name", get_val(1, &settings.api_key_env));
+    make_item(2, "3. Custom Base URL", get_val(2, &settings.base_url));
+    make_item(3, "4. LLM Model Name", get_val(3, &settings.model_name));
+    make_item(4, "5. Max Requests Per Day", get_val(4, &settings.max_requests_per_day.to_string()));
+    make_item(5, "6. Max Words Per Prompt", get_val(5, &settings.max_words_per_prompt.to_string()));
+    make_item(6, "7. Timeout (seconds)", get_val(6, &settings.timeout_seconds.to_string()));
+    make_item(7, "8. Max Retries", get_val(7, &settings.max_retries.to_string()));
+
+    let btn_fetch = if focus == Some(8) { "> [ Fetch Models List ]" } else { "  [ Fetch Models List ]" };
+    let btn_fetch_style = if focus == Some(8) { Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD) } else { Style::default().fg(Color::White) };
+    list_items.push(ListItem::new(Span::styled(btn_fetch, btn_fetch_style)));
+
+    let btn_save = if focus == Some(9) { "> [ Save & Close Settings ]" } else { "  [ Save & Close Settings ]" };
+    let btn_save_style = if focus == Some(9) { Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD) } else { Style::default().fg(Color::White) };
+    list_items.push(ListItem::new(Span::styled(btn_save, btn_save_style)));
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(Span::styled(" App Settings (Enter to Toggle/Edit; Esc to Discard) ", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)));
+
+    let list = List::new(list_items).block(block);
+    f.render_widget(list, fields_area);
+
+    let mut model_items = Vec::new();
+    for m in &app.available_models {
+        model_items.push(ListItem::new(Span::raw(m)));
+    }
+    let models_block = Block::default()
+        .borders(Borders::ALL)
+        .title(Span::styled(" Available Models ", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)));
+    let models_list = List::new(model_items).block(models_block);
+    f.render_widget(models_list, models_area);
+}
+
+fn draw_llm_log(f: &mut Frame, area: Rect, app: &mut AppImpl) {
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Percentage(30), Constraint::Percentage(70)])
+        .split(area);
+
+    let list_area = chunks[0];
+    let details_area = chunks[1];
+
+    let logs = &app.request_logs;
+    if logs.is_empty() {
+        let empty_p = Paragraph::new("No requests logged yet.")
+            .block(Block::default().borders(Borders::ALL).title(" LLM Request Log (Esc/q to Close) "));
+        f.render_widget(empty_p, area);
+        return;
+    }
+
+    let selected_idx = app.log_scroll_position;
+    let list_items: Vec<ListItem> = logs
+        .iter()
+        .enumerate()
+        .map(|(idx, entry)| {
+            let prefix = if idx == selected_idx { "> " } else { "  " };
+            let datetime = chrono::DateTime::from_timestamp(entry.timestamp, 0)
+                .map(|dt| dt.to_rfc3339())
+                .unwrap_or_else(|| "Unknown time".to_string());
+
+            let line = format!(
+                "{}ID: {:<4} | Time: {:<25} | Status: {:<4} | Finish: {}",
+                prefix, entry.id, datetime, entry.status_code, entry.finish_reason
+            );
+            let style = if idx == selected_idx {
+                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::White)
+            };
+            ListItem::new(Span::styled(line, style))
+        })
+        .collect();
+
+    let list_block = Block::default()
+        .borders(Borders::ALL)
+        .title(Span::styled(" LLM Request Log (j/k to Scroll; Esc/q to Close) ", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)));
+    let list = List::new(list_items).block(list_block);
+    f.render_widget(list, list_area);
+
+    if let Some(entry) = logs.get(selected_idx) {
+        let details_chunks = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+            .split(details_area);
+
+        let prompt_block = Block::default().borders(Borders::ALL).title(" Prompt Payload ");
+        let prompt_p = Paragraph::new(entry.prompt.as_str())
+            .block(prompt_block)
+            .wrap(Wrap { trim: false });
+        f.render_widget(prompt_p, details_chunks[0]);
+
+        let response_block = Block::default().borders(Borders::ALL).title(" Response Payload ");
+        let response_p = Paragraph::new(entry.response.as_str())
+            .block(response_block)
+            .wrap(Wrap { trim: false });
+        f.render_widget(response_p, details_chunks[1]);
+    }
 }

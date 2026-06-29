@@ -1707,6 +1707,7 @@ dependencies = [
  "ratatui",
  "rss",
  "rusqlite",
+ "serde",
  "serde_json",
  "ureq",
  "url",

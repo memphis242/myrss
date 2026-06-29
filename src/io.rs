@@ -13,6 +13,7 @@ pub(crate) enum Action {
     ClearFlash,
     RenderAsciiArticle(crate::rss::EntryId, u32),
     SummarizeArticle(crate::rss::EntryId),
+    FetchModels,
 }
 
 /// A loop to process `io::Action` messages.
@@ -176,6 +177,24 @@ pub(crate) fn io_loop(
                     Err(e) => {
                         app.push_error_flash(e);
                         app.set_flash("Summarization failed".to_string());
+                        app.force_redraw()?;
+                    }
+                }
+            }
+            Action::FetchModels => {
+                app.set_flash("Fetching available models...".to_string());
+                app.force_redraw()?;
+
+                let settings = app.settings();
+                match crate::llm::fetch_available_models(&settings.base_url, &settings.api_key_env) {
+                    Ok(models) => {
+                        app.set_available_models(models);
+                        app.set_flash("Models fetched successfully!".to_string());
+                        app.force_redraw()?;
+                    }
+                    Err(e) => {
+                        app.push_error_flash(e);
+                        app.set_flash("Failed to fetch models".to_string());
                         app.force_redraw()?;
                     }
                 }

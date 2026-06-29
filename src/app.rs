@@ -158,6 +158,86 @@ impl App {
         Ok(())
     }
 
+    pub fn settings(&self) -> crate::settings::AppSettings {
+        let inner = self.inner.lock().unwrap();
+        inner.settings.clone()
+    }
+
+    pub fn settings_cursor(&self) -> usize {
+        let inner = self.inner.lock().unwrap();
+        inner.settings_cursor
+    }
+
+    pub fn set_settings_cursor(&self, idx: usize) {
+        let mut inner = self.inner.lock().unwrap();
+        inner.settings_cursor = idx;
+    }
+
+    pub fn settings_buffer(&self) -> String {
+        let inner = self.inner.lock().unwrap();
+        inner.settings_buffer.clone()
+    }
+
+    pub fn set_settings_buffer(&self, s: String) {
+        let mut inner = self.inner.lock().unwrap();
+        inner.settings_buffer = s;
+    }
+
+    pub fn push_settings_buffer_char(&self, c: char) {
+        let mut inner = self.inner.lock().unwrap();
+        inner.settings_buffer.push(c);
+    }
+
+    pub fn pop_settings_buffer_char(&self) {
+        let mut inner = self.inner.lock().unwrap();
+        inner.settings_buffer.pop();
+    }
+
+    pub fn set_available_models(&self, models: Vec<String>) {
+        let mut inner = self.inner.lock().unwrap();
+        inner.available_models = models;
+    }
+
+    pub fn request_logs(&self) -> Vec<crate::cache::RequestLogEntry> {
+        let inner = self.inner.lock().unwrap();
+        inner.request_logs.clone()
+    }
+
+    pub fn log_scroll_position(&self) -> usize {
+        let inner = self.inner.lock().unwrap();
+        inner.log_scroll_position
+    }
+
+    pub fn set_log_scroll_position(&self, idx: usize) {
+        let mut inner = self.inner.lock().unwrap();
+        inner.log_scroll_position = idx;
+    }
+
+    pub fn load_request_logs(&self) {
+        let mut inner = self.inner.lock().unwrap();
+        if let Ok(logs) = crate::cache::get_request_logs() {
+            inner.request_logs = logs;
+            inner.log_scroll_position = 0;
+        }
+    }
+
+    pub fn update_settings(&self, f: impl FnOnce(&mut crate::settings::AppSettings)) {
+        let mut inner = self.inner.lock().unwrap();
+        f(&mut inner.settings);
+    }
+
+    pub fn save_settings(&self) -> Result<()> {
+        let inner = self.inner.lock().unwrap();
+        crate::settings::save_settings(&inner.settings)?;
+        Ok(())
+    }
+
+    pub fn fetch_models_background(&self) -> Result<()> {
+        let inner = self.inner.lock().unwrap();
+        inner.io_tx.send(crate::io::Action::FetchModels)?;
+        Ok(())
+    }
+
     pub fn tick(&self) -> Result<()> {
         let mut inner = self.inner.lock().unwrap();
         inner.tick_count = inner.tick_count.wrapping_add(1);
@@ -285,6 +365,12 @@ pub struct AppImpl {
     pub command_input: String,
     pub current_summary: Option<String>,
     pub tick_count: u32,
+    pub settings: crate::settings::AppSettings,
+    pub settings_cursor: usize,
+    pub settings_buffer: String,
+    pub available_models: Vec<String>,
+    pub request_logs: Vec<crate::cache::RequestLogEntry>,
+    pub log_scroll_position: usize,
 }
 
 impl AppImpl {
@@ -340,6 +426,12 @@ impl AppImpl {
             command_input: String::new(),
             current_summary: None,
             tick_count: 0,
+            settings: crate::settings::load_settings(),
+            settings_cursor: 0,
+            settings_buffer: String::new(),
+            available_models: Vec::new(),
+            request_logs: Vec::new(),
+            log_scroll_position: 0,
         };
 
         app.update_feeds()?;

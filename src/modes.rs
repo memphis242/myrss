@@ -14,6 +14,9 @@ pub enum Mode {
     Editing,
     Normal,
     Command,
+    Settings,
+    SettingsEditing(usize),
+    ViewLlmLog,
 }
 
 #[derive(Clone, Debug)]

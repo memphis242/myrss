@@ -19,11 +19,13 @@ use std::{thread, time};
 
 mod app;
 mod ascii;
+mod cache;
 mod io;
 mod llm;
 mod modes;
 mod opml;
 mod rss;
+mod settings;
 mod ui;
 mod util;
 
@@ -170,6 +172,7 @@ pub enum Event<I> {
 }
 
 fn run_reader(options: ReadOptions) -> Result<()> {
+    let _ = crate::cache::initialize_cache_db();
     enable_raw_mode()?;
 
     let mut stdout = stdout();
@@ -286,6 +289,7 @@ enum Action {
     ToggleNoteworthy,
     OpenArticleWithAscii,
     SummarizeArticle,
+    FetchModels,
 }
 
 fn get_action(app: &App, event: Event<KeyEvent>) -> Option<Action> {
@@ -391,11 +395,26 @@ fn get_action(app: &App, event: Event<KeyEvent>) -> Option<Action> {
                         app.reset_command_input();
                         app.set_mode(Mode::Normal);
                         if cmd == "summarize" {
-                            if app.has_entries() && app.has_current_entry() {
+                            let settings = app.settings();
+                            if !settings.llm_enabled {
+                                app.set_flash("LLM summarization is disabled. Run :settings to enable it.".to_string());
+                                None
+                            } else if settings.api_key_env.is_empty() || settings.model_name.is_empty() {
+                                app.set_flash("LLM Summarization requires API key env and model to be configured in :settings.".to_string());
+                                None
+                            } else if app.has_entries() && app.has_current_entry() {
                                 Some(Action::SummarizeArticle)
                             } else {
                                 None
                             }
+                        } else if cmd == "settings" {
+                            app.set_settings_cursor(0);
+                            app.set_mode(Mode::Settings);
+                            None
+                        } else if cmd == "view_llm_log" {
+                            app.load_request_logs();
+                            app.set_mode(Mode::ViewLlmLog);
+                            None
                         } else {
                             None
                         }
@@ -411,6 +430,149 @@ fn get_action(app: &App, event: Event<KeyEvent>) -> Option<Action> {
                     KeyCode::Esc => {
                         app.reset_command_input();
                         app.set_mode(Mode::Normal);
+                        None
+                    }
+                    _ => None,
+                }
+            }
+            Event::Input(_) => None,
+            Event::Tick => Some(Action::Tick),
+        },
+        Mode::Settings => match event {
+            Event::Input(key_event) if key_event.kind == KeyEventKind::Press => {
+                match key_event.code {
+                    KeyCode::Char('q') | KeyCode::Esc => {
+                        app.update_settings(|s| {
+                            *s = crate::settings::load_settings();
+                        });
+                        app.set_mode(Mode::Normal);
+                        None
+                    }
+                    KeyCode::Char('j') | KeyCode::Down => {
+                        let current = app.settings_cursor();
+                        app.set_settings_cursor((current + 1) % 10);
+                        None
+                    }
+                    KeyCode::Char('k') | KeyCode::Up => {
+                        let current = app.settings_cursor();
+                        app.set_settings_cursor(if current == 0 { 9 } else { current - 1 });
+                        None
+                    }
+                    KeyCode::Enter => {
+                        let cursor = app.settings_cursor();
+                        match cursor {
+                            0 => {
+                                app.update_settings(|s| s.llm_enabled = !s.llm_enabled);
+                                None
+                            }
+                            idx if idx >= 1 && idx <= 7 => {
+                                let settings = app.settings();
+                                let val = match idx {
+                                    1 => settings.api_key_env,
+                                    2 => settings.base_url,
+                                    3 => settings.model_name,
+                                    4 => settings.max_requests_per_day.to_string(),
+                                    5 => settings.max_words_per_prompt.to_string(),
+                                    6 => settings.timeout_seconds.to_string(),
+                                    7 => settings.max_retries.to_string(),
+                                    _ => String::new(),
+                                };
+                                app.set_settings_buffer(val);
+                                app.set_mode(Mode::SettingsEditing(idx));
+                                None
+                            }
+                            8 => Some(Action::FetchModels),
+                            9 => {
+                                if let Err(e) = app.save_settings() {
+                                    app.push_error_flash(e);
+                                    app.set_flash("Failed to save settings".to_string());
+                                } else {
+                                    app.set_flash("Settings saved!".to_string());
+                                }
+                                app.set_mode(Mode::Normal);
+                                None
+                            }
+                            _ => None,
+                        }
+                    }
+                    _ => None,
+                }
+            }
+            Event::Input(_) => None,
+            Event::Tick => Some(Action::Tick),
+        },
+        Mode::SettingsEditing(idx) => match event {
+            Event::Input(key_event) if key_event.kind == KeyEventKind::Press => {
+                match key_event.code {
+                    KeyCode::Esc => {
+                        app.set_mode(Mode::Settings);
+                        None
+                    }
+                    KeyCode::Enter => {
+                        let buffer = app.settings_buffer();
+                        app.update_settings(|s| match idx {
+                            1 => s.api_key_env = buffer,
+                            2 => s.base_url = buffer,
+                            3 => s.model_name = buffer,
+                            4 => {
+                                if let Ok(val) = buffer.parse::<u32>() {
+                                    s.max_requests_per_day = val;
+                                }
+                            }
+                            5 => {
+                                if let Ok(val) = buffer.parse::<usize>() {
+                                    s.max_words_per_prompt = val;
+                                }
+                            }
+                            6 => {
+                                if let Ok(val) = buffer.parse::<u64>() {
+                                    s.timeout_seconds = val;
+                                }
+                            }
+                            7 => {
+                                if let Ok(val) = buffer.parse::<u32>() {
+                                    s.max_retries = val;
+                                }
+                            }
+                            _ => (),
+                        });
+                        app.set_mode(Mode::Settings);
+                        None
+                    }
+                    KeyCode::Char(c) => {
+                        app.push_settings_buffer_char(c);
+                        None
+                    }
+                    KeyCode::Backspace => {
+                        app.pop_settings_buffer_char();
+                        None
+                    }
+                    _ => None,
+                }
+            }
+            Event::Input(_) => None,
+            Event::Tick => Some(Action::Tick),
+        },
+        Mode::ViewLlmLog => match event {
+            Event::Input(key_event) if key_event.kind == KeyEventKind::Press => {
+                match key_event.code {
+                    KeyCode::Char('q') | KeyCode::Esc => {
+                        app.set_mode(Mode::Normal);
+                        None
+                    }
+                    KeyCode::Char('j') | KeyCode::Down => {
+                        let current = app.log_scroll_position();
+                        let total = app.request_logs().len();
+                        if total > 0 && current < total - 1 {
+                            app.set_log_scroll_position(current + 1);
+                        }
+                        None
+                    }
+                    KeyCode::Char('k') | KeyCode::Up => {
+                        let current = app.log_scroll_position();
+                        if current > 0 {
+                            app.set_log_scroll_position(current - 1);
+                        }
                         None
                     }
                     _ => None,
@@ -457,6 +619,9 @@ fn update(app: &mut App, action: Action) -> Result<()> {
         }
         Action::SummarizeArticle => {
             app.summarize_current_entry()?;
+        }
+        Action::FetchModels => {
+            app.fetch_models_background()?;
         }
     };
 
