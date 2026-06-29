@@ -360,19 +360,10 @@ fn scrape_claude_blog(html: &str) -> Option<String> {
     // Extract and append the rest of the content
     let mut remaining = String::new();
     for (i, block) in rich_text_blocks.iter().enumerate() {
-        if i == 0 {
-            let p_blocks = extract_all_by_tag(block, "p");
-            for p in p_blocks.iter().skip(1) {
-                let cleaned_p = clean_html_tags(p).trim().to_string();
-                if !cleaned_p.is_empty() {
-                    remaining.push_str(&format!("{}<br/><br/>", cleaned_p));
-                }
-            }
-        } else {
-            let cleaned = clean_rich_text_block(block);
-            remaining.push_str(&cleaned);
-            remaining.push_str("<br/><br/>");
-        }
+        let skip_p = i == 0;
+        let cleaned = clean_rich_text_block(block, skip_p);
+        remaining.push_str(&cleaned);
+        remaining.push_str("<br/><br/>");
     }
 
     output.push_str(&remaining);
@@ -530,9 +521,10 @@ fn clean_html_tags(html: &str) -> String {
     result.replace("  ", " ").trim().to_string()
 }
 
-fn clean_rich_text_block(block: &str) -> String {
+fn clean_rich_text_block(block: &str, skip_first_p: bool) -> String {
     let mut result = String::new();
     let mut current = block;
+    let mut skipped_p = false;
 
     while !current.is_empty() {
         let next_tag = current.find('<');
@@ -565,9 +557,24 @@ fn clean_rich_text_block(block: &str) -> String {
                             let text = &rest[end_p_open + 1..end_p];
                             let cleaned = clean_html_tags(text).trim().to_string();
                             if !cleaned.is_empty() {
-                                result.push_str(&format!("{}<br/><br/>", cleaned));
+                                if skip_first_p && !skipped_p {
+                                    skipped_p = true;
+                                } else {
+                                    result.push_str(&format!("{}<br/><br/>", cleaned));
+                                }
                             }
                             current = &rest[end_p + 4..];
+                            continue;
+                        }
+                    }
+                }
+                if rest.starts_with("<li") {
+                    if let Some(end_li_open) = rest.find('>') {
+                        if let Some(end_li) = rest.find("</li>") {
+                            let text = &rest[end_li_open + 1..end_li];
+                            let cleaned = clean_html_tags(text).trim().to_string();
+                            result.push_str(&format!("- {}<br/><br/>", cleaned));
+                            current = &rest[end_li + 5..];
                             continue;
                         }
                     }
@@ -868,5 +875,33 @@ mod tests {
         assert!(content.contains("[ Bolt.new ]"), "Bolt testimony not found");
         assert!(content.contains("[ EVERSTAR ]"), "EVERSTAR testimony not found");
         assert!(content.contains("[ Momentic ]"), "Momentic testimony not found");
+    }
+
+    #[test]
+    fn test_artifacts_in_claude_code_extraction() {
+        let html_path = "tests/article_examples/artifacts-in-claude-code.html";
+        let html = std::fs::read_to_string(html_path).expect("Failed to read test HTML file");
+        let content = extract_main_article_content(&html);
+        println!("DEBUG LOCAL E2E CONTENT:\n{}", content);
+
+        // Verify Title
+        assert!(content.contains("Claude Code now supports artifacts") || content.contains("Claude Code now supports Artifacts"), "Title not found");
+
+        // Verify Subheadings
+        assert!(content.contains("## Built on the context from your session"), "Subheading H2 'Built on the context' not found");
+        assert!(content.contains("## Live pages that update in place"), "Subheading H2 'Live pages' not found");
+        assert!(content.contains("## Private to your organization"), "Subheading H2 'Private to your organization' not found");
+        assert!(content.contains("## Getting started"), "Subheading H2 'Getting started' not found");
+
+        // Verify list-items (bullet points)
+        assert!(content.contains("- Legal / open source"), "List item 'Legal / open source' not found");
+        assert!(content.contains("- Privacy"), "List item 'Privacy' not found");
+        assert!(content.contains("- Security"), "List item 'Security' not found");
+        assert!(content.contains("- FinOps / platform finance"), "List item 'FinOps' not found");
+        assert!(content.contains("- Software engineers"), "List item 'Software engineers' not found");
+        assert!(content.contains("- Designers"), "List item 'Designers' not found");
+        assert!(content.contains("- Staff engineers"), "List item 'Staff engineers' not found");
+        assert!(content.contains("- SRE"), "List item 'SRE & on-call' not found");
+        assert!(content.contains("- Engineering managers"), "List item 'Engineering managers' not found");
     }
 }
