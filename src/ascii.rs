@@ -844,20 +844,8 @@ mod tests {
 
     #[test]
     fn test_claude_blog_extraction_e2e() {
-        let url = "https://claude.com/blog/claude-in-microsoft-foundry";
-        let client = ureq::AgentBuilder::new()
-            .timeout(std::time::Duration::from_secs(15))
-            .build();
-
-        let response = match client.get(url).call() {
-            Ok(r) => r,
-            Err(e) => {
-                println!("Skipping E2E test because network request failed: {}", e);
-                return;
-            }
-        };
-
-        let html = response.into_string().unwrap();
+        let html_path = "tests/article_examples/claude-in-microsoft-foundry.html";
+        let html = std::fs::read_to_string(html_path).expect("Failed to read test HTML file");
         let content = extract_main_article_content(&html);
         let client_dummy = ureq::Agent::new();
         let rendered = render_article_with_ascii_images(&client_dummy, &content, 80);
