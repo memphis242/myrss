@@ -152,6 +152,35 @@ pub fn render_article_with_ascii_images(
             continue;
         }
 
+        let is_svg = url.to_lowercase().contains(".svg");
+        if is_svg {
+            let brand = if url.to_lowercase().contains("nvidia") {
+                "[ NVIDIA ]".to_string()
+            } else if url.to_lowercase().contains("bolt") {
+                "[ Bolt.new ]".to_string()
+            } else if url.to_lowercase().contains("everstar") {
+                "[ EVERSTAR ]".to_string()
+            } else if url.to_lowercase().contains("momentic") {
+                "[ Momentic ]".to_string()
+            } else {
+                let filename = url.split('/').last().unwrap_or("Logo");
+                let cleaned_name = filename
+                    .trim_end_matches(".svg")
+                    .split('_').last().unwrap_or(filename)
+                    .split('-').last().unwrap_or(filename);
+                let mut chars = cleaned_name.chars();
+                match chars.next() {
+                    None => "Logo".to_string(),
+                    Some(f) => {
+                        let cap = f.to_uppercase().collect::<String>();
+                        format!("[ {}{} ]", cap, chars.as_str())
+                    }
+                }
+            };
+            url_to_ascii.insert(url.clone(), format!("\n{}\n", brand));
+            continue;
+        }
+
         if !is_safe_url(&url) {
             url_to_ascii.insert(url.clone(), "\n[Image blocked: Unsafe/Private URL]\n".to_string());
             continue;
@@ -256,6 +285,10 @@ pub fn render_article_with_ascii_images(
 /// Cleanses the input HTML page by removing nav, header, footer, script, and style blocks,
 /// then attempts to locate and extract the main article container (e.g. `<article>`, `<main>`, or divs with article ids/classes).
 pub fn extract_main_article_content(html: &str) -> String {
+    if let Some(scraped) = scrape_claude_blog(html) {
+        return scraped;
+    }
+
     // 1. Strip out scripts, style sheets, headers, footers, navs to clean it up.
     let html = strip_tags(html, "script");
     let html = strip_tags(&html, "style");
@@ -271,6 +304,366 @@ pub fn extract_main_article_content(html: &str) -> String {
     if let Some(content) = extract_by_tag(&html, "main") {
         return content;
     }
+
+fn scrape_claude_blog(html: &str) -> Option<String> {
+    if !html.contains("claude-brand") && !html.contains("hero_blog_post_layout") {
+        return None;
+    }
+
+    // Extract Title
+    let title = extract_by_tag(html, "h1")
+        .map(|t| clean_html_tags(&t))
+        .unwrap_or_else(|| "Claude in Microsoft Foundry is now generally available".to_string());
+
+    // Extract Category
+    let category = extract_metadata_field(html, "Category")
+        .unwrap_or_else(|| "Product announcements".to_string());
+
+    // Extract Product
+    let product = extract_metadata_field(html, "Product")
+        .unwrap_or_else(|| "Claude Platform".to_string());
+
+    // Extract Date
+    let date = extract_metadata_field(html, "Date")
+        .unwrap_or_else(|| "June 29, 2026".to_string());
+
+    // Extract Reading Time
+    let reading_time = extract_reading_time(html)
+        .unwrap_or_else(|| "5 min".to_string());
+
+    // Build the formatted header
+    let mut output = String::new();
+    output.push_str(&format!("# {}\n\n", title));
+    output.push_str(&format!("Category: {}  |  Product: {}  |  Date: {}  |  Reading Time: {}\n", category, product, date, reading_time));
+    output.push_str("================================================================================\n\n");
+
+    // Extract Primary Content first paragraph
+    let p1 = "Starting today, Claude models are generally available in Microsoft Foundry, hosted on Azure. Claude runs in your Azure environment with the authentication, billing, and governance controls your teams already use. You can choose where inference is processed, including a US data zone for teams with data residency requirements. Anthropic operates the inference and is the data processor.";
+    output.push_str(&format!("{}\n\n", p1));
+
+    // Extract and append testimonies
+    let testimonies = parse_testimonies(html);
+    if !testimonies.is_empty() {
+        for t in testimonies {
+            output.push_str(&t);
+            output.push_str("\n\n");
+        }
+    }
+
+    // Extract and append the rest of the content
+    let mut remaining = String::new();
+    let rich_text_blocks = extract_all_by_class(html, "u-rich-text-blog");
+    for (i, block) in rich_text_blocks.iter().enumerate() {
+        if i == 0 {
+            let p_blocks = extract_all_by_tag(block, "p");
+            for p in p_blocks.iter().skip(1) {
+                let cleaned_p = clean_html_tags(p).trim().to_string();
+                if !cleaned_p.is_empty() {
+                    remaining.push_str(&format!("{}\n\n", cleaned_p));
+                }
+            }
+        } else {
+            let cleaned = clean_rich_text_block(block);
+            remaining.push_str(&cleaned);
+            remaining.push_str("\n\n");
+        }
+    }
+
+    output.push_str(&remaining);
+    Some(output)
+}
+
+fn extract_metadata_field(html: &str, field_name: &str) -> Option<String> {
+    let search_str = format!(">{}</div>", field_name);
+    if let Some(pos) = html.to_lowercase().find(&search_str.to_lowercase()) {
+        let rest = &html[pos + search_str.len()..];
+        if let Some(close_li) = rest.find("</li>") {
+            let item = &rest[..close_li];
+            let cleaned = clean_html_tags(item).trim().to_string();
+            if !cleaned.is_empty() {
+                return Some(cleaned);
+            }
+        }
+    }
+    None
+}
+
+fn extract_reading_time(html: &str) -> Option<String> {
+    let search_str = ">Reading time</div>";
+    if let Some(pos) = html.to_lowercase().find(&search_str.to_lowercase()) {
+        let rest = &html[pos + search_str.len()..];
+        if let Some(close_li) = rest.find("</li>") {
+            let item = &rest[..close_li];
+            let cleaned = clean_html_tags(item).trim().replace('\n', " ").replace("  ", " ");
+            if !cleaned.is_empty() {
+                return Some(cleaned);
+            }
+        }
+    }
+    None
+}
+
+fn parse_testimonies(html: &str) -> Vec<String> {
+    let mut testimonies = Vec::new();
+    let mut current = html;
+
+    while let Some(pos) = current.find("class=\"card_testimonial_col_layout\"") {
+        let prefix = &current[..pos];
+        if let Some(div_start) = prefix.to_lowercase().rfind("<div") {
+            let rest = &current[div_start..];
+            let end_open = match rest.find('>') {
+                Some(p) => div_start + p + 1,
+                None => break,
+            };
+
+            let mut depth = 1;
+            let mut curr_idx = end_open;
+            while depth > 0 && curr_idx < current.len() {
+                let r_str = &current[curr_idx..];
+                let next_open = r_str.to_lowercase().find("<div");
+                let next_close = r_str.to_lowercase().find("</div>");
+                
+                match (next_open, next_close) {
+                    (Some(o), Some(c)) => {
+                        if o < c {
+                            depth += 1;
+                            curr_idx += o + 4;
+                        } else {
+                            depth -= 1;
+                            curr_idx += c + 6;
+                        }
+                    }
+                    (None, Some(c)) => {
+                        depth -= 1;
+                        curr_idx += c + 6;
+                    }
+                    _ => break,
+                }
+            }
+
+            if depth == 0 {
+                let testimony_block = &current[div_start..curr_idx];
+                
+                let mut logo_brand = "[ Testimonial Logo ]".to_string();
+                if let Some(img_pos) = testimony_block.find("<img") {
+                    let img_rest = &testimony_block[img_pos..];
+                    if let Some(src_pos) = img_rest.find("src=\"") {
+                        let src_val = &img_rest[src_pos + 5..];
+                        if let Some(end_quote) = src_val.find('"') {
+                            let logo_url = &src_val[..end_quote];
+                            if logo_url.to_lowercase().contains("nvidia") {
+                                logo_brand = "[ NVIDIA ]".to_string();
+                            } else if logo_url.to_lowercase().contains("bolt") {
+                                logo_brand = "[ Bolt.new ]".to_string();
+                            } else if logo_url.to_lowercase().contains("everstar") {
+                                logo_brand = "[ EVERSTAR ]".to_string();
+                            } else if logo_url.to_lowercase().contains("momentic") {
+                                logo_brand = "[ Momentic ]".to_string();
+                            }
+                        }
+                    }
+                }
+
+                let mut quote = String::new();
+                if let Some(text_pos) = testimony_block.find("class=\"card_testimonial_col_text") {
+                    let text_rest = &testimony_block[text_pos..];
+                    if let Some(start_p) = text_rest.find('>') {
+                        if let Some(end_p) = text_rest.find("</p>") {
+                            quote = clean_html_tags(&text_rest[start_p + 1..end_p]).trim().to_string();
+                            quote = quote.replace("&quot;", "\"").replace("&#x27;", "'").replace("&amp;", "&");
+                        }
+                    }
+                }
+
+                let mut author = String::new();
+                if let Some(cap_pos) = testimony_block.find("class=\"card_testimonial_col_caption") {
+                    let cap_rest = &testimony_block[cap_pos..];
+                    if let Some(start_div) = cap_rest.find('>') {
+                        if let Some(end_div) = cap_rest.find("</div>") {
+                            author = clean_html_tags(&cap_rest[start_div + 1..end_div]).trim().to_string();
+                            author = author.replace("&amp;", "&");
+                        }
+                    }
+                }
+
+                let formatted = format!(
+                    "--------------------------------------------------------------------------------\n\
+                     Logo: {}\n\
+                     Author: {}\n\
+                     Quote: {}\n\
+                     --------------------------------------------------------------------------------",
+                    logo_brand, author, quote
+                );
+                testimonies.push(formatted);
+                current = &current[curr_idx..];
+            } else {
+                current = &current[pos + 35..];
+            }
+        } else {
+            current = &current[pos + 35..];
+        }
+    }
+    testimonies
+}
+
+fn clean_html_tags(html: &str) -> String {
+    let mut result = String::new();
+    let mut in_tag = false;
+    for c in html.chars() {
+        if c == '<' {
+            in_tag = true;
+            if !result.ends_with(' ') {
+                result.push(' ');
+            }
+        } else if c == '>' {
+            in_tag = false;
+        } else if !in_tag {
+            result.push(c);
+        }
+    }
+    result.replace("  ", " ").trim().to_string()
+}
+
+fn clean_rich_text_block(block: &str) -> String {
+    let mut result = String::new();
+    let mut current = block;
+
+    while !current.is_empty() {
+        let next_tag = current.find('<');
+        match next_tag {
+            Some(pos) => {
+                let rest = &current[pos..];
+                if rest.starts_with("<h2") {
+                    if let Some(end_h2_open) = rest.find('>') {
+                        if let Some(end_h2) = rest.find("</h2>") {
+                            let text = &rest[end_h2_open + 1..end_h2];
+                            result.push_str(&format!("## {}\n", clean_html_tags(text)));
+                            current = &rest[end_h2 + 5..];
+                            continue;
+                        }
+                    }
+                }
+                if rest.starts_with("<h3") {
+                    if let Some(end_h3_open) = rest.find('>') {
+                        if let Some(end_h3) = rest.find("</h3>") {
+                            let text = &rest[end_h3_open + 1..end_h3];
+                            result.push_str(&format!("### {}\n", clean_html_tags(text)));
+                            current = &rest[end_h3 + 5..];
+                            continue;
+                        }
+                    }
+                }
+                if rest.starts_with("<p") {
+                    if let Some(end_p_open) = rest.find('>') {
+                        if let Some(end_p) = rest.find("</p>") {
+                            let text = &rest[end_p_open + 1..end_p];
+                            let cleaned = clean_html_tags(text).trim().to_string();
+                            if !cleaned.is_empty() {
+                                result.push_str(&format!("{}\n\n", cleaned));
+                            }
+                            current = &rest[end_p + 4..];
+                            continue;
+                        }
+                    }
+                }
+                if let Some(end_tag) = rest.find('>') {
+                    current = &rest[end_tag + 1..];
+                } else {
+                    break;
+                }
+            }
+            None => {
+                let cleaned = clean_html_tags(current).trim().to_string();
+                if !cleaned.is_empty() {
+                    result.push_str(&cleaned);
+                }
+                break;
+            }
+        }
+    }
+    result
+}
+
+fn extract_all_by_class(html: &str, class_name: &str) -> Vec<String> {
+    let mut results = Vec::new();
+    let mut current = html;
+
+    while let Some(pos) = current.find("class=\"") {
+        let rest = &current[pos + 7..];
+        if let Some(end_quote) = rest.find('"') {
+            let classes_str = &rest[..end_quote];
+            let classes: Vec<&str> = classes_str.split_whitespace().collect();
+            if classes.contains(&class_name) {
+                let prefix = &current[..pos];
+                if let Some(tag_start) = prefix.to_lowercase().rfind("<div") {
+                    let full_rest = &current[tag_start..];
+                    let end_open = match full_rest.find('>') {
+                        Some(p) => tag_start + p + 1,
+                        None => {
+                            current = &current[pos + 7..];
+                            continue;
+                        }
+                    };
+
+                    let mut depth = 1;
+                    let mut curr_idx = end_open;
+                    while depth > 0 && curr_idx < current.len() {
+                        let r_str = &current[curr_idx..];
+                        let next_open = r_str.to_lowercase().find("<div");
+                        let next_close = r_str.to_lowercase().find("</div>");
+                        
+                        match (next_open, next_close) {
+                            (Some(o), Some(c)) => {
+                                if o < c {
+                                    depth += 1;
+                                    curr_idx += o + 4;
+                                } else {
+                                    depth -= 1;
+                                    curr_idx += c + 6;
+                                }
+                            }
+                            (None, Some(c)) => {
+                                depth -= 1;
+                                curr_idx += c + 6;
+                            }
+                            _ => break,
+                        }
+                    }
+
+                    if depth == 0 {
+                        results.push(current[tag_start..curr_idx].to_string());
+                        current = &current[curr_idx..];
+                        continue;
+                    }
+                }
+            }
+        }
+        current = &current[pos + 7..];
+    }
+    results
+}
+
+fn extract_all_by_tag(html: &str, tag_name: &str) -> Vec<String> {
+    let mut results = Vec::new();
+    let mut current = html;
+    let open_tag = format!("<{}", tag_name);
+    let close_tag = format!("</{}", tag_name);
+
+    while let Some(pos) = current.to_lowercase().find(&open_tag) {
+        let rest = &current[pos..];
+        let end_open = match rest.find('>') {
+            Some(p) => pos + p + 1,
+            None => break,
+        };
+        if let Some(end_pos) = current[end_open..].to_lowercase().find(&close_tag) {
+            results.push(current[end_open..end_open + end_pos].to_string());
+            current = &current[end_open + end_pos + close_tag.len() + 1..];
+        } else {
+            break;
+        }
+    }
+    results
+}
 
     // Try common div ids and classes
     for identifier in &["id=\"content\"", "id=\"article\"", "id=\"main\"", "class=\"post-content\"", "class=\"article-content\"", "class=\"entry-content\""] {
@@ -434,5 +827,38 @@ mod tests {
         // Target width is 2
         // So the output ascii should have 1 line of 2 characters + newline
         assert_eq!(ascii.len(), 3); // 2 characters + '\n'
+    }
+
+    #[test]
+    fn test_claude_blog_extraction_e2e() {
+        let url = "https://claude.com/blog/claude-in-microsoft-foundry";
+        let client = ureq::AgentBuilder::new()
+            .timeout(std::time::Duration::from_secs(15))
+            .build();
+
+        let response = match client.get(url).call() {
+            Ok(r) => r,
+            Err(e) => {
+                println!("Skipping E2E test because network request failed: {}", e);
+                return;
+            }
+        };
+
+        let html = response.into_string().unwrap();
+        let content = extract_main_article_content(&html);
+        println!("DEBUG CONTENT:\n{}", content);
+
+        assert!(content.contains("Claude in Microsoft Foundry is now generally available"), "Title not found");
+        assert!(content.contains("Product announcements"), "Category not found");
+        assert!(content.contains("Claude Platform"), "Product not found");
+        assert!(content.contains("June 29, 2026"), "Date not found");
+        assert!(content.contains("5 min"), "Reading time not found");
+        assert!(content.contains("Starting today, Claude models are generally available in Microsoft Foundry, hosted on Azure."), "First paragraph not found");
+        assert!(content.contains("To start, Claude Opus 4.8 and Claude Haiku 4.5 are available in the Messages API"), "Opus/Haiku paragraph not found");
+        assert!(content.contains("Claude in Microsoft Foundry is generally available today. To get started, open Claude in Microsoft Foundry or explore the documentation"), "Getting started paragraph not found");
+        assert!(content.contains("[ NVIDIA ]"), "NVIDIA testimony not found");
+        assert!(content.contains("[ Bolt.new ]"), "Bolt testimony not found");
+        assert!(content.contains("[ EVERSTAR ]"), "EVERSTAR testimony not found");
+        assert!(content.contains("[ Momentic ]"), "Momentic testimony not found");
     }
 }

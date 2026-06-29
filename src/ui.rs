@@ -548,7 +548,29 @@ fn draw_entry(f: &mut Frame, area: Rect, app: &mut AppImpl) {
             .fg(Color::Cyan),
     ));
 
-    let paragraph = Paragraph::new(app.current_entry_text.as_str())
+    let mut lines = Vec::new();
+    for line in app.current_entry_text.lines() {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with("# ") {
+            let heading = trimmed[2..].to_uppercase();
+            lines.push(Line::from(Span::styled(heading, Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))));
+        } else if trimmed.starts_with("## ") {
+            let heading = trimmed[3..].to_string();
+            lines.push(Line::from(Span::styled(heading, Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))));
+        } else if trimmed.starts_with("### ") {
+            let heading = trimmed[4..].to_string();
+            lines.push(Line::from(Span::styled(heading, Style::default().fg(Color::White).add_modifier(Modifier::BOLD))));
+        } else if trimmed.starts_with("=====") || trimmed.starts_with("-----") {
+            lines.push(Line::from(Span::styled(line, Style::default().fg(Color::DarkGray))));
+        } else if trimmed.starts_with("[Image") || trimmed.starts_with("[SVG") || (trimmed.starts_with("[") && trimmed.ends_with("]")) {
+            lines.push(Line::from(Span::styled(line, Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))));
+        } else {
+            lines.push(Line::from(line));
+        }
+    }
+    let text = Text::from(lines);
+
+    let paragraph = Paragraph::new(text)
         .block(block)
         .wrap(Wrap { trim: false })
         .scroll((scroll, 0));
