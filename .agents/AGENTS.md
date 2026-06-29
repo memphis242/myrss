@@ -14,3 +14,4 @@ This file outlines the rules and guidelines for this workspace.
 - **SSRF & Resource Safety**:
   - Image downloads for ASCII art conversion must check URLs to block private/internal IP ranges (e.g. localhost, private subnets).
   - Impose a strict maximum download size limit (e.g., 5MB) on image downloads to protect against decompression/resource bombs.
+- **No Hardcoded Dynamic Content**: Never hardcode content that is clearly dynamic (such as user-fed content or downloaded webpage contents). All scraped, fetched, or input content must be processed and extracted dynamically.
