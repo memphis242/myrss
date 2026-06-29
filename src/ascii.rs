@@ -337,8 +337,15 @@ fn scrape_claude_blog(html: &str) -> Option<String> {
     output.push_str(&format!("Category: {}  |  Product: {}  |  Date: {}  |  Reading Time: {}<br/>", category, product, date, reading_time));
     output.push_str("================================================================================<br/><br/>");
 
-    // Extract Primary Content first paragraph
-    let p1 = "Starting today, Claude models are generally available in Microsoft Foundry, hosted on Azure. Claude runs in your Azure environment with the authentication, billing, and governance controls your teams already use. You can choose where inference is processed, including a US data zone for teams with data residency requirements. Anthropic operates the inference and is the data processor.";
+    // Extract Primary Content first paragraph dynamically
+    let rich_text_blocks = extract_all_by_class(html, "u-rich-text-blog");
+    let mut p1 = String::new();
+    if !rich_text_blocks.is_empty() {
+        let p_blocks = extract_all_by_tag(&rich_text_blocks[0], "p");
+        if !p_blocks.is_empty() {
+            p1 = clean_html_tags(&p_blocks[0]).trim().to_string();
+        }
+    }
     output.push_str(&format!("{}<br/><br/>", p1));
 
     // Extract and append testimonies
@@ -352,7 +359,6 @@ fn scrape_claude_blog(html: &str) -> Option<String> {
 
     // Extract and append the rest of the content
     let mut remaining = String::new();
-    let rich_text_blocks = extract_all_by_class(html, "u-rich-text-blog");
     for (i, block) in rich_text_blocks.iter().enumerate() {
         if i == 0 {
             let p_blocks = extract_all_by_tag(block, "p");
@@ -487,11 +493,11 @@ fn parse_testimonies(html: &str) -> Vec<String> {
                 }
 
                 let formatted = format!(
-                    "<br/><br/>--------------------------------------------------------------------------------<br/>\
+                    "--------------------------------------------------------------------------------<br/>\
                      Logo: {}<br/>\
                      Author: {}<br/>\
                      Quote: {}<br/>\
-                     --------------------------------------------------------------------------------<br/><br/>",
+                     --------------------------------------------------------------------------------",
                     logo_brand, author, quote
                 );
                 testimonies.push(formatted);
@@ -537,7 +543,7 @@ fn clean_rich_text_block(block: &str) -> String {
                     if let Some(end_h2_open) = rest.find('>') {
                         if let Some(end_h2) = rest.find("</h2>") {
                             let text = &rest[end_h2_open + 1..end_h2];
-                            result.push_str(&format!("<br/><br/>## {}<br/><br/>", clean_html_tags(text)));
+                            result.push_str(&format!("## {}<br/><br/>", clean_html_tags(text)));
                             current = &rest[end_h2 + 5..];
                             continue;
                         }
@@ -547,7 +553,7 @@ fn clean_rich_text_block(block: &str) -> String {
                     if let Some(end_h3_open) = rest.find('>') {
                         if let Some(end_h3) = rest.find("</h3>") {
                             let text = &rest[end_h3_open + 1..end_h3];
-                            result.push_str(&format!("<br/><br/>### {}<br/><br/>", clean_html_tags(text)));
+                            result.push_str(&format!("### {}<br/><br/>", clean_html_tags(text)));
                             current = &rest[end_h3 + 5..];
                             continue;
                         }
