@@ -4,7 +4,7 @@ use crate::modes::{Mode, ReadMode, Selected};
 use crate::util;
 use anyhow::Result;
 use copypasta::{ClipboardContext, ClipboardProvider};
-use ratatui::{backend::CrosstermBackend, Terminal};
+use ratatui::{Terminal, backend::CrosstermBackend};
 use std::sync::{Arc, Mutex};
 
 macro_rules! delegate_to_locked_inner {
@@ -85,11 +85,11 @@ impl App {
 
     pub fn handle_g_keypress(&self) -> bool {
         let mut inner = self.inner.lock().unwrap();
-        if let Some(instant) = inner.g_pressed_at {
-            if instant.elapsed() < std::time::Duration::from_millis(1000) {
-                inner.g_pressed_at = None;
-                return true;
-            }
+        if let Some(instant) = inner.g_pressed_at
+            && instant.elapsed() < std::time::Duration::from_millis(1000)
+        {
+            inner.g_pressed_at = None;
+            return true;
         }
         inner.g_pressed_at = Some(std::time::Instant::now());
         false
@@ -144,7 +144,10 @@ impl App {
         if let Some(entry_meta) = &inner.current_entry_meta {
             let entry_id = entry_meta.id;
             let width = inner.entry_column_width;
-            inner.io_tx.send(crate::io::Action::RenderAsciiArticle(entry_id, width as u32))?;
+            inner.io_tx.send(crate::io::Action::RenderAsciiArticle(
+                entry_id,
+                width as u32,
+            ))?;
         }
         Ok(())
     }
@@ -153,7 +156,9 @@ impl App {
         let inner = self.inner.lock().unwrap();
         if let Some(entry_meta) = &inner.current_entry_meta {
             let entry_id = entry_meta.id;
-            inner.io_tx.send(crate::io::Action::SummarizeArticle(entry_id))?;
+            inner
+                .io_tx
+                .send(crate::io::Action::SummarizeArticle(entry_id))?;
         }
         Ok(())
     }
@@ -243,7 +248,6 @@ impl App {
         inner.tick_count = inner.tick_count.wrapping_add(1);
         Ok(())
     }
-
 
     pub fn draw(&self, terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>) -> Result<()> {
         let mut inner = self.inner.lock().unwrap();
@@ -507,10 +511,10 @@ impl AppImpl {
         };
 
         let new_feed_id = self.current_feed.as_ref().map(|f| f.id);
-        if prev_feed_id != new_feed_id {
-            if let Some(prev_id) = prev_feed_id {
-                crate::rss::clear_newly_added_for_feed(&self.conn, prev_id)?;
-            }
+        if prev_feed_id != new_feed_id
+            && let Some(prev_id) = prev_feed_id
+        {
+            crate::rss::clear_newly_added_for_feed(&self.conn, prev_id)?;
         }
 
         Ok(())
@@ -581,19 +585,17 @@ impl AppImpl {
         if matches!(self.selected, Selected::Entry(_)) {
             self.entry_scroll_position = self
                 .entry_scroll_position
-                .checked_sub(self.entry_lines_rendered_len)
-                .unwrap_or_default()
+                .saturating_sub(self.entry_lines_rendered_len)
         };
     }
 
     pub fn page_down(&mut self) {
         if matches!(self.selected, Selected::Entry(_)) {
-            let max_scroll = self
-                .entry_lines_len
-                .saturating_sub(self.entry_lines_rendered_len as usize)
-                as u16;
-            self.entry_scroll_position = (self.entry_scroll_position + self.entry_lines_rendered_len)
-                .min(max_scroll);
+            let max_scroll =
+                self.entry_lines_len
+                    .saturating_sub(self.entry_lines_rendered_len as usize) as u16;
+            self.entry_scroll_position =
+                (self.entry_scroll_position + self.entry_lines_rendered_len).min(max_scroll);
         }
     }
 
@@ -812,7 +814,9 @@ impl AppImpl {
 
             #[cfg(not(target_os = "linux"))]
             {
-                unreachable!("This should never happen. This code should only be reachable if the target OS is WSL.")
+                unreachable!(
+                    "This should never happen. This code should only be reachable if the target OS is WSL."
+                )
             }
         } else if let Some(current_link) = current_link {
             let mut ctx = ClipboardContext::new().map_err(|e| anyhow::anyhow!(e))?;
@@ -976,4 +980,3 @@ impl AppImpl {
         Ok(())
     }
 }
-

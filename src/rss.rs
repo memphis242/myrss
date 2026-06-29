@@ -996,19 +996,19 @@ mod tests {
         let mut conn = rusqlite::Connection::open_in_memory().unwrap();
         initialize_db(&mut conn).unwrap();
         subscribe_to_feed(&http_client, &mut conn, ZCT).unwrap();
-        
+
         let feed_id = FeedId::from(1);
         let entries = get_entries_metas(&conn, &ReadMode::ShowUnread, feed_id).unwrap();
         assert!(!entries.is_empty());
-        
+
         let entry = &entries[0];
         assert!(!entry.noteworthy);
-        
+
         entry.toggle_noteworthy(&conn).unwrap();
-        
+
         let entry_updated = get_entry_meta(&conn, entry.id).unwrap();
         assert!(entry_updated.noteworthy);
-        
+
         entry_updated.toggle_noteworthy(&conn).unwrap();
         let entry_updated_again = get_entry_meta(&conn, entry.id).unwrap();
         assert!(!entry_updated_again.noteworthy);

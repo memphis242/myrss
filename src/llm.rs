@@ -1,3 +1,8 @@
+// `ureq::Error` is a large enum (its `Status` variant carries a whole `Response`),
+// and the request closures here forward `ureq`'s `Result` directly — the Err size is
+// dictated by the external API, not our own types, so boxing it buys nothing.
+#![allow(clippy::result_large_err)]
+
 use std::env;
 use ureq::Agent;
 
@@ -26,13 +31,18 @@ pub fn summarize_article(text: &str) -> anyhow::Result<String> {
     }
 
     if settings.api_key_env.is_empty() || settings.model_name.is_empty() {
-        anyhow::bail!("LLM Summarization requires API key env and model to be configured in :settings.");
+        anyhow::bail!(
+            "LLM Summarization requires API key env and model to be configured in :settings."
+        );
     }
 
     // 1. Check daily rate limit
     let limit_ok = crate::cache::check_daily_rate_limit(settings.max_requests_per_day)?;
     if !limit_ok {
-        anyhow::bail!("Daily request limit of {} requests exceeded.", settings.max_requests_per_day);
+        anyhow::bail!(
+            "Daily request limit of {} requests exceeded.",
+            settings.max_requests_per_day
+        );
     }
 
     // 2. Truncate text and format prompt wrapped in XML tags
@@ -40,13 +50,19 @@ pub fn summarize_article(text: &str) -> anyhow::Result<String> {
     let prompt_payload = format!("<article_text>\n{}\n</article_text>", truncated_text);
 
     // 3. Check local cache
-    if let Some(cached) = crate::cache::get_cached_summary(&prompt_payload, &settings.model_name, SYSTEM_PROMPT)? {
+    if let Some(cached) =
+        crate::cache::get_cached_summary(&prompt_payload, &settings.model_name, SYSTEM_PROMPT)?
+    {
         return Ok(cached);
     }
 
     // 4. Resolve API key
-    let api_key = env::var(&settings.api_key_env)
-        .map_err(|_| anyhow::anyhow!("API key environment variable '{}' is not set.", settings.api_key_env))?;
+    let api_key = env::var(&settings.api_key_env).map_err(|_| {
+        anyhow::anyhow!(
+            "API key environment variable '{}' is not set.",
+            settings.api_key_env
+        )
+    })?;
 
     // Determine provider from model name prefix (e.g. "gemini/", "openai/")
     let model_lower = settings.model_name.to_lowercase();
@@ -70,7 +86,11 @@ pub fn summarize_article(text: &str) -> anyhow::Result<String> {
         } else if env_lower.contains("groq") {
             "groq"
         } else {
-            anyhow::bail!("Could not determine provider from model '{}' or API key env '{}'. Prefix the model with provider name (e.g. 'gemini/gemini-2.5-flash').", settings.model_name, settings.api_key_env);
+            anyhow::bail!(
+                "Could not determine provider from model '{}' or API key env '{}'. Prefix the model with provider name (e.g. 'gemini/gemini-2.5-flash').",
+                settings.model_name,
+                settings.api_key_env
+            );
         }
     };
 
@@ -86,23 +106,57 @@ pub fn summarize_article(text: &str) -> anyhow::Result<String> {
         .build();
 
     let result = match provider {
-        "gemini" => call_gemini_api(&client, &settings.base_url, &model_id, &api_key, &prompt_payload, settings.max_retries),
-        "openai" => call_openai_api(&client, &settings.base_url, &model_id, &api_key, &prompt_payload, settings.max_retries),
-        "anthropic" => call_anthropic_api(&client, &settings.base_url, &model_id, &api_key, &prompt_payload, settings.max_retries),
-        "groq" => call_groq_api(&client, &settings.base_url, &model_id, &api_key, &prompt_payload, settings.max_retries),
+        "gemini" => call_gemini_api(
+            &client,
+            &settings.base_url,
+            &model_id,
+            &api_key,
+            &prompt_payload,
+            settings.max_retries,
+        ),
+        "openai" => call_openai_api(
+            &client,
+            &settings.base_url,
+            &model_id,
+            &api_key,
+            &prompt_payload,
+            settings.max_retries,
+        ),
+        "anthropic" => call_anthropic_api(
+            &client,
+            &settings.base_url,
+            &model_id,
+            &api_key,
+            &prompt_payload,
+            settings.max_retries,
+        ),
+        "groq" => call_groq_api(
+            &client,
+            &settings.base_url,
+            &model_id,
+            &api_key,
+            &prompt_payload,
+            settings.max_retries,
+        ),
         _ => unreachable!(),
     };
 
     match result {
         Ok((summary, finish_reason)) => {
             // Write to cache and log success
-            let _ = crate::cache::insert_cached_summary(&prompt_payload, &settings.model_name, SYSTEM_PROMPT, &summary);
+            let _ = crate::cache::insert_cached_summary(
+                &prompt_payload,
+                &settings.model_name,
+                SYSTEM_PROMPT,
+                &summary,
+            );
             let _ = crate::cache::log_request(&prompt_payload, &summary, 200, &finish_reason);
             Ok(summary)
         }
         Err(e) => {
             // Log failure
-            let _ = crate::cache::log_request(&prompt_payload, &format!("Error: {}", e), 500, "error");
+            let _ =
+                crate::cache::log_request(&prompt_payload, &format!("Error: {}", e), 500, "error");
             Err(e)
         }
     }
@@ -121,10 +175,14 @@ where
             Ok(response) => {
                 let status = response.status();
                 // Treat server errors (5xx) as transient and retry
-                if status >= 500 && status < 600 {
+                if (500..600).contains(&status) {
                     attempt += 1;
                     if attempt > max_retries {
-                        return Err(anyhow::anyhow!("Request failed with HTTP status {} after {} attempts", status, max_retries));
+                        return Err(anyhow::anyhow!(
+                            "Request failed with HTTP status {} after {} attempts",
+                            status,
+                            max_retries
+                        ));
                     }
                     std::thread::sleep(delay);
                     delay *= 2;
@@ -135,7 +193,11 @@ where
             Err(e) => {
                 attempt += 1;
                 if attempt > max_retries {
-                    return Err(anyhow::anyhow!("Request failed after {} attempts: {}", max_retries, e));
+                    return Err(anyhow::anyhow!(
+                        "Request failed after {} attempts: {}",
+                        max_retries,
+                        e
+                    ));
                 }
 
                 // Identify if error is transient (HTTP 429, or transport errors like connection/timeout)
@@ -155,11 +217,26 @@ where
     }
 }
 
-fn call_gemini_api(client: &Agent, base_url: &str, model: &str, api_key: &str, text: &str, max_retries: u32) -> anyhow::Result<(String, String)> {
+fn call_gemini_api(
+    client: &Agent,
+    base_url: &str,
+    model: &str,
+    api_key: &str,
+    text: &str,
+    max_retries: u32,
+) -> anyhow::Result<(String, String)> {
     let url = if base_url.is_empty() {
-        format!("https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}", model, api_key)
+        format!(
+            "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}",
+            model, api_key
+        )
     } else {
-        format!("{}/v1beta/models/{}:generateContent?key={}", base_url.trim_end_matches('/'), model, api_key)
+        format!(
+            "{}/v1beta/models/{}:generateContent?key={}",
+            base_url.trim_end_matches('/'),
+            model,
+            api_key
+        )
     };
 
     let body = serde_json::json!({
@@ -184,7 +261,8 @@ fn call_gemini_api(client: &Agent, base_url: &str, model: &str, api_key: &str, t
 
     let body_str = serde_json::to_string(&body)?;
     let response = execute_with_retry(max_retries, || {
-        client.post(&url)
+        client
+            .post(&url)
             .set("Content-Type", "application/json")
             .send_string(&body_str)
     })?;
@@ -204,7 +282,14 @@ fn call_gemini_api(client: &Agent, base_url: &str, model: &str, api_key: &str, t
     Ok((summary.to_string(), finish_reason))
 }
 
-fn call_openai_api(client: &Agent, base_url: &str, model: &str, api_key: &str, text: &str, max_retries: u32) -> anyhow::Result<(String, String)> {
+fn call_openai_api(
+    client: &Agent,
+    base_url: &str,
+    model: &str,
+    api_key: &str,
+    text: &str,
+    max_retries: u32,
+) -> anyhow::Result<(String, String)> {
     let url = if base_url.is_empty() {
         "https://api.openai.com/v1/chat/completions".to_string()
     } else {
@@ -227,7 +312,8 @@ fn call_openai_api(client: &Agent, base_url: &str, model: &str, api_key: &str, t
 
     let body_str = serde_json::to_string(&body)?;
     let response = execute_with_retry(max_retries, || {
-        client.post(&url)
+        client
+            .post(&url)
             .set("Content-Type", "application/json")
             .set("Authorization", &format!("Bearer {}", api_key))
             .send_string(&body_str)
@@ -248,7 +334,14 @@ fn call_openai_api(client: &Agent, base_url: &str, model: &str, api_key: &str, t
     Ok((summary.to_string(), finish_reason))
 }
 
-fn call_anthropic_api(client: &Agent, base_url: &str, model: &str, api_key: &str, text: &str, max_retries: u32) -> anyhow::Result<(String, String)> {
+fn call_anthropic_api(
+    client: &Agent,
+    base_url: &str,
+    model: &str,
+    api_key: &str,
+    text: &str,
+    max_retries: u32,
+) -> anyhow::Result<(String, String)> {
     let url = if base_url.is_empty() {
         "https://api.anthropic.com/v1/messages".to_string()
     } else {
@@ -269,7 +362,8 @@ fn call_anthropic_api(client: &Agent, base_url: &str, model: &str, api_key: &str
 
     let body_str = serde_json::to_string(&body)?;
     let response = execute_with_retry(max_retries, || {
-        client.post(&url)
+        client
+            .post(&url)
             .set("Content-Type", "application/json")
             .set("x-api-key", api_key)
             .set("anthropic-version", "2023-06-01")
@@ -291,7 +385,14 @@ fn call_anthropic_api(client: &Agent, base_url: &str, model: &str, api_key: &str
     Ok((summary.to_string(), finish_reason))
 }
 
-fn call_groq_api(client: &Agent, base_url: &str, model: &str, api_key: &str, text: &str, max_retries: u32) -> anyhow::Result<(String, String)> {
+fn call_groq_api(
+    client: &Agent,
+    base_url: &str,
+    model: &str,
+    api_key: &str,
+    text: &str,
+    max_retries: u32,
+) -> anyhow::Result<(String, String)> {
     let url = if base_url.is_empty() {
         "https://api.groq.com/openapi/v1/chat/completions".to_string()
     } else {
@@ -314,7 +415,8 @@ fn call_groq_api(client: &Agent, base_url: &str, model: &str, api_key: &str, tex
 
     let body_str = serde_json::to_string(&body)?;
     let response = execute_with_retry(max_retries, || {
-        client.post(&url)
+        client
+            .post(&url)
             .set("Content-Type", "application/json")
             .set("Authorization", &format!("Bearer {}", api_key))
             .send_string(&body_str)
@@ -340,9 +442,10 @@ pub fn fetch_available_models(base_url: &str, api_key_env: &str) -> anyhow::Resu
     if api_key_env.is_empty() {
         anyhow::bail!("API key environment variable name is not configured in settings.");
     }
-    let api_key = std::env::var(api_key_env)
-        .map_err(|_| anyhow::anyhow!("API key environment variable '{}' is not set.", api_key_env))?;
-    
+    let api_key = std::env::var(api_key_env).map_err(|_| {
+        anyhow::anyhow!("API key environment variable '{}' is not set.", api_key_env)
+    })?;
+
     let client = ureq::AgentBuilder::new()
         .timeout(std::time::Duration::from_secs(10))
         .build();
@@ -353,9 +456,16 @@ pub fn fetch_available_models(base_url: &str, api_key_env: &str) -> anyhow::Resu
 
     if is_gemini {
         let url = if base_url.is_empty() {
-            format!("https://generativelanguage.googleapis.com/v1beta/models?key={}", api_key)
+            format!(
+                "https://generativelanguage.googleapis.com/v1beta/models?key={}",
+                api_key
+            )
         } else {
-            format!("{}/v1beta/models?key={}", base_url.trim_end_matches('/'), api_key)
+            format!(
+                "{}/v1beta/models?key={}",
+                base_url.trim_end_matches('/'),
+                api_key
+            )
         };
         let response = client.get(&url).call()?;
         let json: serde_json::Value = serde_json::from_str(&response.into_string()?)?;
@@ -382,7 +492,8 @@ pub fn fetch_available_models(base_url: &str, api_key_env: &str) -> anyhow::Resu
 
     let req = client.get(&url).set("Content-Type", "application/json");
     let req = if is_anthropic {
-        req.set("x-api-key", &api_key).set("anthropic-version", "2023-06-01")
+        req.set("x-api-key", &api_key)
+            .set("anthropic-version", "2023-06-01")
     } else {
         req.set("Authorization", &format!("Bearer {}", api_key))
     };
@@ -421,7 +532,10 @@ mod tests {
     #[test]
     fn test_truncate_to_max_words() {
         let t = "hello world this is a test text";
-        assert_eq!(truncate_to_max_words(t, 3), "hello world this\n[... Content truncated due to length limits ...]");
+        assert_eq!(
+            truncate_to_max_words(t, 3),
+            "hello world this\n[... Content truncated due to length limits ...]"
+        );
         assert_eq!(truncate_to_max_words(t, 10), t);
     }
 }

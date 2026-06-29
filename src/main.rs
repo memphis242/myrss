@@ -15,9 +15,9 @@ use std::path::PathBuf;
 use std::sync::mpsc;
 use std::{thread, time};
 
-use myrss::modes::{Mode, Selected};
 use myrss::app::App;
-use myrss::{ReadOptions, ImportOptions, Event, io};
+use myrss::modes::{Mode, Selected};
+use myrss::{Event, ImportOptions, ReadOptions, io};
 
 fn main() -> Result<()> {
     let options = Options::parse();
@@ -133,7 +133,6 @@ enum ValidatedOptions {
     Import(ImportOptions),
 }
 
-
 fn get_database_path(database_path: &Option<PathBuf>) -> std::io::Result<PathBuf> {
     let database_path = if let Some(database_path) = database_path {
         database_path.to_owned()
@@ -152,7 +151,6 @@ fn get_database_path(database_path: &Option<PathBuf>) -> std::io::Result<PathBuf
 
     Ok(database_path)
 }
-
 
 fn run_reader(options: ReadOptions) -> Result<()> {
     let _ = myrss::cache::initialize_cache_db();
@@ -308,15 +306,16 @@ fn get_action(app: &App, event: Event<KeyEvent>) -> Option<Action> {
                             },
                             (KeyCode::Char('x'), KeyModifiers::NONE) => Some(Action::RefreshAll),
                             (KeyCode::Left, _) | (KeyCode::Char('h'), _) => Some(Action::MoveLeft),
-                            (KeyCode::Right, _) | (KeyCode::Char('l'), _) => Some(Action::MoveRight),
+                            (KeyCode::Right, _) | (KeyCode::Char('l'), _) => {
+                                Some(Action::MoveRight)
+                            }
                             (KeyCode::Down, _) | (KeyCode::Char('j'), _) => Some(Action::MoveDown),
                             (KeyCode::Up, _) | (KeyCode::Char('k'), _) => Some(Action::MoveUp),
                             (KeyCode::PageUp, _) | (KeyCode::Char('u'), KeyModifiers::CONTROL) => {
                                 Some(Action::PageUp)
                             }
-                            (KeyCode::PageDown, _) | (KeyCode::Char('d'), KeyModifiers::CONTROL) => {
-                                Some(Action::PageDown)
-                            }
+                            (KeyCode::PageDown, _)
+                            | (KeyCode::Char('d'), KeyModifiers::CONTROL) => Some(Action::PageDown),
                             (KeyCode::Enter, _) => match app.selected() {
                                 Selected::Entries | Selected::Entry(_) => {
                                     if app.has_entries() && app.has_current_entry() {
@@ -370,61 +369,67 @@ fn get_action(app: &App, event: Event<KeyEvent>) -> Option<Action> {
             Event::Input(_) => None,
             Event::Tick => Some(Action::Tick),
         },
-        Mode::Command => match event {
-            Event::Input(key_event) if key_event.kind == KeyEventKind::Press => {
-                match key_event.code {
-                    KeyCode::Enter => {
-                        let cmd = app.command_input();
-                        app.reset_command_input();
-                        app.set_mode(Mode::Normal);
-                        if cmd == "summarize" {
-                            let settings = app.settings();
-                            if !settings.llm_enabled {
-                                app.set_flash("LLM summarization is disabled. Run :settings to enable it.".to_string());
+        Mode::Command => {
+            match event {
+                Event::Input(key_event) if key_event.kind == KeyEventKind::Press => {
+                    match key_event.code {
+                        KeyCode::Enter => {
+                            let cmd = app.command_input();
+                            app.reset_command_input();
+                            app.set_mode(Mode::Normal);
+                            if cmd == "summarize" {
+                                let settings = app.settings();
+                                if !settings.llm_enabled {
+                                    app.set_flash("LLM summarization is disabled. Run :settings to enable it.".to_string());
+                                    None
+                                } else if settings.api_key_env.is_empty()
+                                    || settings.model_name.is_empty()
+                                {
+                                    app.set_flash("LLM Summarization requires API key env and model to be configured in :settings.".to_string());
+                                    None
+                                } else if app.has_entries() && app.has_current_entry() {
+                                    Some(Action::SummarizeArticle)
+                                } else {
+                                    None
+                                }
+                            } else if cmd == "settings" {
+                                app.set_settings_cursor(0);
+                                app.set_mode(Mode::Settings);
                                 None
-                            } else if settings.api_key_env.is_empty() || settings.model_name.is_empty() {
-                                app.set_flash("LLM Summarization requires API key env and model to be configured in :settings.".to_string());
+                            } else if cmd == "view_llm_log" {
+                                app.load_request_logs();
+                                app.set_mode(Mode::ViewLlmLog);
                                 None
-                            } else if app.has_entries() && app.has_current_entry() {
-                                Some(Action::SummarizeArticle)
+                            } else if cmd == "clear_cache" {
+                                app.set_mode(Mode::Confirmation(
+                                    myrss::modes::ConfirmationAction::ClearCache,
+                                ));
+                                None
                             } else {
+                                app.set_flash(format!("Unknown command: :{}", cmd));
                                 None
                             }
-                        } else if cmd == "settings" {
-                            app.set_settings_cursor(0);
-                            app.set_mode(Mode::Settings);
-                            None
-                        } else if cmd == "view_llm_log" {
-                            app.load_request_logs();
-                            app.set_mode(Mode::ViewLlmLog);
-                            None
-                        } else if cmd == "clear_cache" {
-                            app.set_mode(Mode::Confirmation(myrss::modes::ConfirmationAction::ClearCache));
-                            None
-                        } else {
-                            app.set_flash(format!("Unknown command: :{}", cmd));
+                        }
+                        KeyCode::Char(c) => {
+                            app.push_command_char(c);
                             None
                         }
+                        KeyCode::Backspace => {
+                            app.pop_command_char();
+                            None
+                        }
+                        KeyCode::Esc => {
+                            app.reset_command_input();
+                            app.set_mode(Mode::Normal);
+                            None
+                        }
+                        _ => None,
                     }
-                    KeyCode::Char(c) => {
-                        app.push_command_char(c);
-                        None
-                    }
-                    KeyCode::Backspace => {
-                        app.pop_command_char();
-                        None
-                    }
-                    KeyCode::Esc => {
-                        app.reset_command_input();
-                        app.set_mode(Mode::Normal);
-                        None
-                    }
-                    _ => None,
                 }
+                Event::Input(_) => None,
+                Event::Tick => Some(Action::Tick),
             }
-            Event::Input(_) => None,
-            Event::Tick => Some(Action::Tick),
-        },
+        }
         Mode::Settings => match event {
             Event::Input(key_event) if key_event.kind == KeyEventKind::Press => {
                 match key_event.code {
@@ -452,7 +457,7 @@ fn get_action(app: &App, event: Event<KeyEvent>) -> Option<Action> {
                                 app.update_settings(|s| s.llm_enabled = !s.llm_enabled);
                                 None
                             }
-                            idx if idx >= 1 && idx <= 7 => {
+                            idx if (1..=7).contains(&idx) => {
                                 let settings = app.settings();
                                 let val = match idx {
                                     1 => settings.api_key_env,
@@ -575,8 +580,12 @@ fn get_action(app: &App, event: Event<KeyEvent>) -> Option<Action> {
                         match action {
                             myrss::modes::ConfirmationAction::ClearCache => {
                                 match myrss::cache::clear_cache() {
-                                    Ok(_) => app.set_flash("LLM request cache cleared successfully!".to_string()),
-                                    Err(e) => app.set_flash(format!("Failed to clear cache: {}", e)),
+                                    Ok(_) => app.set_flash(
+                                        "LLM request cache cleared successfully!".to_string(),
+                                    ),
+                                    Err(e) => {
+                                        app.set_flash(format!("Failed to clear cache: {}", e))
+                                    }
                                 }
                             }
                         }

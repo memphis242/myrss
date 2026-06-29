@@ -1,7 +1,7 @@
-use std::path::PathBuf;
-use rusqlite::{params, Connection};
+use rusqlite::{Connection, params};
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
+use std::path::PathBuf;
 
 #[derive(Clone, Debug)]
 pub struct RequestLogEntry {
@@ -60,7 +60,11 @@ fn compute_hash<T: Hash>(t: &T) -> String {
 pub const PROMPT_VERSION: &str = "v1";
 
 /// Checks the cache for an existing summary matching the article text, model, and system prompt.
-pub fn get_cached_summary(text: &str, model: &str, system_prompt: &str) -> anyhow::Result<Option<String>> {
+pub fn get_cached_summary(
+    text: &str,
+    model: &str,
+    system_prompt: &str,
+) -> anyhow::Result<Option<String>> {
     let conn = Connection::open(cache_db_path())?;
     let cache_key = compute_hash(&(PROMPT_VERSION.to_string() + text + model + system_prompt));
 
@@ -75,7 +79,12 @@ pub fn get_cached_summary(text: &str, model: &str, system_prompt: &str) -> anyho
 }
 
 /// Writes a summary response to the SQLite cache table.
-pub fn insert_cached_summary(text: &str, model: &str, system_prompt: &str, response: &str) -> anyhow::Result<()> {
+pub fn insert_cached_summary(
+    text: &str,
+    model: &str,
+    system_prompt: &str,
+    response: &str,
+) -> anyhow::Result<()> {
     let conn = Connection::open(cache_db_path())?;
     let text_hash = compute_hash(&text);
     let prompt_hash = compute_hash(&system_prompt);
@@ -107,7 +116,12 @@ pub fn check_daily_rate_limit(max_per_day: u32) -> anyhow::Result<bool> {
 }
 
 /// Logs a request to the database.
-pub fn log_request(prompt: &str, response: &str, status_code: i32, finish_reason: &str) -> anyhow::Result<()> {
+pub fn log_request(
+    prompt: &str,
+    response: &str,
+    status_code: i32,
+    finish_reason: &str,
+) -> anyhow::Result<()> {
     let conn = Connection::open(cache_db_path())?;
     let now = chrono::Utc::now().timestamp();
 
@@ -127,18 +141,20 @@ pub fn get_request_logs() -> anyhow::Result<Vec<RequestLogEntry>> {
         "SELECT id, timestamp, prompt, response, status_code, finish_reason 
          FROM request_log 
          ORDER BY id DESC 
-         LIMIT 100"
+         LIMIT 100",
     )?;
-    let entries = stmt.query_map([], |row| {
-        Ok(RequestLogEntry {
-            id: row.get(0)?,
-            timestamp: row.get(1)?,
-            prompt: row.get(2)?,
-            response: row.get(3)?,
-            status_code: row.get(4)?,
-            finish_reason: row.get(5)?,
-        })
-    })?.collect::<Result<Vec<_>, _>>()?;
+    let entries = stmt
+        .query_map([], |row| {
+            Ok(RequestLogEntry {
+                id: row.get(0)?,
+                timestamp: row.get(1)?,
+                prompt: row.get(2)?,
+                response: row.get(3)?,
+                status_code: row.get(4)?,
+                finish_reason: row.get(5)?,
+            })
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
     Ok(entries)
 }
 
@@ -167,7 +183,8 @@ mod tests {
                 created_at INTEGER
             )",
             [],
-        ).unwrap();
+        )
+        .unwrap();
         conn.execute(
             "CREATE TABLE request_log (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -178,15 +195,18 @@ mod tests {
                 finish_reason TEXT
             )",
             [],
-        ).unwrap();
+        )
+        .unwrap();
 
         // Check cache empty
         let cache_key = compute_hash(&("hello".to_string() + "model" + "prompt"));
-        let count: u32 = conn.query_row(
-            "SELECT COUNT(*) FROM llm_cache WHERE cache_key = ?1",
-            [&cache_key],
-            |r| r.get(0),
-        ).unwrap();
+        let count: u32 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM llm_cache WHERE cache_key = ?1",
+                [&cache_key],
+                |r| r.get(0),
+            )
+            .unwrap();
         assert_eq!(count, 0);
 
         // Check insert log
@@ -194,13 +214,16 @@ mod tests {
             "INSERT INTO request_log (timestamp, prompt, response, status_code, finish_reason)
              VALUES (?1, ?2, ?3, ?4, ?5)",
             params![123456, "prompt", "response", 200, "stop"],
-        ).unwrap();
+        )
+        .unwrap();
 
-        let logged: String = conn.query_row(
-            "SELECT response FROM request_log WHERE timestamp = 123456",
-            [],
-            |r| r.get(0),
-        ).unwrap();
+        let logged: String = conn
+            .query_row(
+                "SELECT response FROM request_log WHERE timestamp = 123456",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
         assert_eq!(logged, "response");
     }
 }

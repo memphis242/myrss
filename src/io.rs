@@ -1,8 +1,8 @@
 //! This module provides a way to asynchronously refresh feeds, using threads
 
+use crate::ReadOptions;
 use crate::app::App;
 use crate::modes::Mode;
-use crate::ReadOptions;
 use anyhow::Result;
 
 pub enum Action {
@@ -129,27 +129,31 @@ pub fn io_loop(
                             .unwrap_or(&empty_string)
                             .clone();
 
-                        if let Ok(entry_meta) = crate::rss::get_entry_meta(&conn, entry_id) {
-                            if let Some(link) = &entry_meta.link {
-                                if crate::ascii::is_safe_url(link) {
-                                    app.set_flash("Fetching full article content...".to_string());
-                                    let _ = app.force_redraw();
+                        if let Ok(entry_meta) = crate::rss::get_entry_meta(&conn, entry_id)
+                            && let Some(link) = &entry_meta.link
+                            && crate::ascii::is_safe_url(link)
+                        {
+                            app.set_flash("Fetching full article content...".to_string());
+                            let _ = app.force_redraw();
 
-                                    let client = app.http_client();
-                                    if let Ok(resp) = client.get(link).call() {
-                                        if let Ok(resp_body) = resp.into_string() {
-                                            let cleaned_html = crate::ascii::extract_main_article_content(&resp_body);
-                                            if !cleaned_html.trim().is_empty() {
-                                                html = cleaned_html;
-                                            }
-                                        }
-                                    }
+                            let client = app.http_client();
+                            if let Ok(resp) = client.get(link).call()
+                                && let Ok(resp_body) = resp.into_string()
+                            {
+                                let cleaned_html =
+                                    crate::ascii::extract_main_article_content(&resp_body);
+                                if !cleaned_html.trim().is_empty() {
+                                    html = cleaned_html;
                                 }
                             }
                         }
 
                         let http_client = app.http_client();
-                        let rendered_text = crate::ascii::render_article_with_ascii_images(&http_client, &html, target_width);
+                        let rendered_text = crate::ascii::render_article_with_ascii_images(
+                            &http_client,
+                            &html,
+                            target_width,
+                        );
 
                         if let Ok(entry_meta) = crate::rss::get_entry_meta(&conn, entry_id) {
                             app.set_entry_ascii_content(rendered_text, entry_meta);
@@ -178,18 +182,18 @@ pub fn io_loop(
                             .unwrap_or(&empty_string)
                             .clone();
 
-                        if let Ok(entry_meta) = crate::rss::get_entry_meta(&conn, entry_id) {
-                            if let Some(link) = &entry_meta.link {
-                                if crate::ascii::is_safe_url(link) {
-                                    let client = app.http_client();
-                                    if let Ok(resp) = client.get(link).call() {
-                                        if let Ok(resp_body) = resp.into_string() {
-                                            let cleaned_html = crate::ascii::extract_main_article_content(&resp_body);
-                                            if !cleaned_html.trim().is_empty() {
-                                                html = cleaned_html;
-                                            }
-                                        }
-                                    }
+                        if let Ok(entry_meta) = crate::rss::get_entry_meta(&conn, entry_id)
+                            && let Some(link) = &entry_meta.link
+                            && crate::ascii::is_safe_url(link)
+                        {
+                            let client = app.http_client();
+                            if let Ok(resp) = client.get(link).call()
+                                && let Ok(resp_body) = resp.into_string()
+                            {
+                                let cleaned_html =
+                                    crate::ascii::extract_main_article_content(&resp_body);
+                                if !cleaned_html.trim().is_empty() {
+                                    html = cleaned_html;
                                 }
                             }
                         }
@@ -224,7 +228,8 @@ pub fn io_loop(
                 app.force_redraw()?;
 
                 let settings = app.settings();
-                match crate::llm::fetch_available_models(&settings.base_url, &settings.api_key_env) {
+                match crate::llm::fetch_available_models(&settings.base_url, &settings.api_key_env)
+                {
                     Ok(models) => {
                         app.set_available_models(models);
                         app.set_flash("Models fetched successfully!".to_string());

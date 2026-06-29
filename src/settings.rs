@@ -37,12 +37,11 @@ pub fn settings_dir() -> PathBuf {
 /// Loads the application settings from `~/.myrss/config.json`.
 pub fn load_settings() -> AppSettings {
     let path = settings_dir().join("config.json");
-    if path.exists() {
-        if let Ok(content) = std::fs::read_to_string(&path) {
-            if let Ok(settings) = serde_json::from_str(&content) {
-                return settings;
-            }
-        }
+    if path.exists()
+        && let Ok(content) = std::fs::read_to_string(&path)
+        && let Ok(settings) = serde_json::from_str(&content)
+    {
+        return settings;
     }
     AppSettings::default()
 }

@@ -27,8 +27,8 @@ fn test_article_scrolling_bounds_regression() {
         newly_added: false,
     };
     app.selected = Selected::Entry(dummy_metadata);
-    app.entry_lines_len = 100;           // total lines of article
-    app.entry_lines_rendered_len = 25;   // visible viewport size
+    app.entry_lines_len = 100; // total lines of article
+    app.entry_lines_rendered_len = 25; // visible viewport size
 
     // Test initial state
     assert_eq!(app.entry_scroll_position, 0);
