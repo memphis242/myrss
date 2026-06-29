@@ -136,21 +136,31 @@ fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
 }
 
 fn draw_info_column(f: &mut Frame, area: Rect, app: &mut AppImpl) {
-    let mut constraints = match &app.mode {
+    let constraints = match &app.mode {
         Mode::Normal | Mode::Command | Mode::Settings | Mode::SettingsEditing(_) | Mode::ViewLlmLog | Mode::Confirmation(_) => {
-            vec![Constraint::Percentage(70), Constraint::Percentage(30)]
+            if app.show_help {
+                vec![Constraint::Min(0), Constraint::Percentage(25), Constraint::Length(10)]
+            } else {
+                vec![Constraint::Percentage(70), Constraint::Percentage(30)]
+            }
         }
-        Mode::Editing => vec![
-            Constraint::Percentage(60),
-            Constraint::Percentage(20),
-            Constraint::Percentage(10),
-        ],
+        Mode::Editing => {
+            if app.show_help {
+                vec![
+                    Constraint::Min(0),
+                    Constraint::Percentage(20),
+                    Constraint::Length(3),
+                    Constraint::Length(10),
+                ]
+            } else {
+                vec![
+                    Constraint::Min(0),
+                    Constraint::Percentage(20),
+                    Constraint::Length(3),
+                ]
+            }
+        }
     };
-
-    if app.show_help {
-        constraints[1] = Constraint::Percentage(20);
-        constraints.push(Constraint::Percentage(10));
-    }
 
     let chunks = Layout::default()
         .constraints(constraints)
@@ -369,41 +379,45 @@ fn draw_feed_info(f: &mut Frame, area: Rect, app: &mut AppImpl) {
 
 fn draw_help(f: &mut Frame, area: Rect, app: &mut AppImpl) {
     let mut text = String::new();
+
+    text.push_str("KEYS:\n");
     match app.selected {
         Selected::Feeds => {
-            text.push_str("gg/G - snap top/bottom; r - refresh; x - refresh all\n");
-            text.push_str("c - copy link; o - open browser; : - command mode\n");
+            text.push_str("  gg/G: snap top/bottom | r: refresh | x: refresh all\n");
+            text.push_str("  c: copy link | o: open browser | i: add feed | q: quit\n");
         }
         _ => {
-            text.push_str("gg/G - snap top/bottom; r - toggle read; a - toggle read/unread\n");
-            text.push_str("M - noteworthy; O - view text; : - command mode\n");
+            text.push_str("  gg/G: snap top/bottom | r: toggle read | a: read mode\n");
+            text.push_str("  M: noteworthy | O: view text | q: quit\n");
         }
     }
     match app.mode {
-        Mode::Normal => text.push_str("i - edit mode; q - exit\n"),
+        Mode::Normal => {}
         Mode::Editing => {
-            text.push_str("enter - fetch feed; del - delete feed\n");
-            text.push_str("esc - normal mode\n")
+            text.push_str("  enter: fetch feed | del: delete feed | esc: exit edit\n");
         }
         Mode::Command => {
-            text.push_str("Type command and press enter (e.g. summarize)\n");
-            text.push_str("esc - normal mode\n")
+            text.push_str("  Type command and press Enter | esc: exit command\n");
         }
         Mode::Settings => {
-            text.push_str("j/k - navigate; enter - edit/toggle; esc - discard & exit\n");
+            text.push_str("  j/k: navigate | enter: edit/toggle | esc: discard & exit\n");
         }
         Mode::SettingsEditing(_) => {
-            text.push_str("Type new value; enter - save value; esc - cancel edit\n");
+            text.push_str("  Type new value | enter: save | esc: cancel edit\n");
         }
         Mode::ViewLlmLog => {
-            text.push_str("j/k - scroll requests; esc/q - close log\n");
+            text.push_str("  j/k: scroll requests | esc/q: close log\n");
         }
         Mode::Confirmation(_) => {
-            text.push_str("y - confirm; n/esc - cancel\n");
+            text.push_str("  y: confirm | n/esc: cancel\n");
         }
     }
 
-    text.push_str("? - show/hide help");
+    text.push_str("COMMANDS:\n");
+    text.push_str("  :settings - configure | :view_llm_log - API logs\n");
+    text.push_str("  :clear_cache - clear LLM cache | :summarize - AI summary\n");
+
+    text.push_str("? - toggle help");
 
     let help_message =
         Paragraph::new(Text::from(text.as_str())).block(Block::default().borders(Borders::ALL));
