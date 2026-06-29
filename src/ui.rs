@@ -13,15 +13,10 @@ use crate::rss::EntryMetadata;
 
 const PINK: Color = Color::Rgb(255, 150, 167);
 
-pub fn predraw(f: &Frame, mode: Mode) -> Rc<[Rect]> {
-    let constraints = match mode {
-        Mode::Command => vec![Constraint::Min(0), Constraint::Length(1)],
-        _ => vec![Constraint::Min(0), Constraint::Length(0)],
-    };
-
+pub fn predraw(f: &Frame, _mode: Mode) -> Rc<[Rect]> {
     let main_layout = Layout::default()
         .direction(Direction::Vertical)
-        .constraints(constraints)
+        .constraints([Constraint::Min(0), Constraint::Length(1)])
         .split(f.area());
 
     Layout::default()
@@ -69,16 +64,31 @@ pub fn draw(f: &mut Frame, chunks: Rc<[Rect]>, app: &mut AppImpl) {
         }
     }
 
-    if matches!(app.mode, Mode::Command) {
-        let bottom_layout = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([Constraint::Min(0), Constraint::Length(1)])
-            .split(f.area());
+    let bottom_layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(0), Constraint::Length(1)])
+        .split(f.area());
 
+    let status_chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Min(0), Constraint::Length(15)])
+        .split(bottom_layout[1]);
+
+    if matches!(app.mode, Mode::Command) {
         let cmd_text = format!(":{}", app.command_input);
         let cmd_paragraph = Paragraph::new(cmd_text).style(Style::default().fg(Color::Yellow));
-        f.render_widget(cmd_paragraph, bottom_layout[1]);
+        f.render_widget(cmd_paragraph, status_chunks[0]);
     }
+
+    let read_mode_str = match app.read_mode {
+        crate::modes::ReadMode::ShowRead => "READ",
+        crate::modes::ReadMode::ShowUnread => "UNREAD",
+        crate::modes::ReadMode::All => "ALL",
+    };
+    let read_mode_paragraph = Paragraph::new(read_mode_str)
+        .style(Style::default().fg(Color::DarkGray).add_modifier(Modifier::BOLD))
+        .alignment(ratatui::layout::Alignment::Right);
+    f.render_widget(read_mode_paragraph, status_chunks[1]);
 
     if let Mode::Confirmation(action) = app.mode {
         let size = f.area();
@@ -422,11 +432,11 @@ fn draw_entries(f: &mut Frame, area: Rect, app: &mut AppImpl) {
         .iter()
         .map(|entry| {
             let title = entry.title.as_ref().map_or("No title", |t| t.as_str());
-            let style = if entry.newly_added {
+            let mut style = if entry.newly_added {
                 let is_bright = (app.tick_count / 2) % 2 == 0;
                 let show_underline = app.tick_count % 2 == 0;
                 let color = if is_bright { Color::LightMagenta } else { Color::Magenta };
-                let mut s = Style::default().fg(color).add_modifier(Modifier::BOLD);
+                let mut s = Style::default().fg(color);
                 if show_underline {
                     s = s.add_modifier(Modifier::UNDERLINED);
                 }
@@ -436,6 +446,10 @@ fn draw_entries(f: &mut Frame, area: Rect, app: &mut AppImpl) {
             } else {
                 Style::default()
             };
+
+            if entry.read_at.is_none() {
+                style = style.add_modifier(Modifier::BOLD);
+            }
 
             let styled_title = if entry.noteworthy {
                 format!("★ {title}")
