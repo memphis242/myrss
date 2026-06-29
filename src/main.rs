@@ -281,6 +281,7 @@ enum Action {
     ToggleReadStatus,
     SnapToTop,
     SnapToBottom,
+    ToggleNoteworthy,
 }
 
 fn get_action(app: &App, event: Event<KeyEvent>) -> Option<Action> {
@@ -340,6 +341,7 @@ fn get_action(app: &App, event: Event<KeyEvent>) -> Option<Action> {
                             (KeyCode::Char('c'), _) => Some(Action::CopyLinkToClipboard),
                             (KeyCode::Char('o'), _) => Some(Action::OpenLinkInBrowser),
                             (KeyCode::Char('G'), _) => Some(Action::SnapToBottom),
+                            (KeyCode::Char('M'), _) => Some(Action::ToggleNoteworthy),
                             _ => None,
                         }
                     }
@@ -398,6 +400,7 @@ fn update(app: &mut App, action: Action) -> Result<()> {
         Action::SelectAndShowCurrentEntry => app.select_and_show_current_entry()?,
         Action::SnapToTop => app.on_snap_to_top()?,
         Action::SnapToBottom => app.on_snap_to_bottom()?,
+        Action::ToggleNoteworthy => app.toggle_noteworthy()?,
     };
 
     Ok(())

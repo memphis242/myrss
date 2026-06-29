@@ -313,10 +313,13 @@ fn draw_entries(f: &mut Frame, area: Rect, app: &mut AppImpl) {
         .items
         .iter()
         .map(|entry| {
-            ListItem::new(Span::raw(entry.title.as_ref().map_or_else(
-                || std::borrow::Cow::from("No title"),
-                std::borrow::Cow::from,
-            )))
+            let title = entry.title.as_ref().map_or("No title", |t| t.as_str());
+            if entry.noteworthy {
+                let styled_title = format!("★ {title}");
+                ListItem::new(Span::styled(styled_title, Style::default().fg(Color::Yellow)))
+            } else {
+                ListItem::new(Span::raw(title.to_string()))
+            }
         })
         .collect::<Vec<ListItem>>();
 
@@ -382,6 +385,12 @@ fn draw_entry(f: &mut Frame, area: Rect, app: &mut AppImpl) {
 
     let entry_title = entry_meta.title.as_deref().unwrap_or("No entry title");
 
+    let mut entry_title_str = String::new();
+    if entry_meta.noteworthy {
+        entry_title_str.push_str("★ ");
+    }
+    entry_title_str.push_str(entry_title);
+
     let feed_title = app
         .current_feed
         .as_ref()
@@ -389,8 +398,8 @@ fn draw_entry(f: &mut Frame, area: Rect, app: &mut AppImpl) {
         .unwrap_or("No feed title");
 
     let mut title = String::new();
-    title.reserve_exact(entry_title.len() + feed_title.len() + 3);
-    title.push_str(entry_title);
+    title.reserve_exact(entry_title_str.len() + feed_title.len() + 3);
+    title.push_str(&entry_title_str);
     title.push_str(" - ");
     title.push_str(feed_title);
 

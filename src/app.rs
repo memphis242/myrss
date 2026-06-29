@@ -66,6 +66,7 @@ impl App {
         (toggle_help, Result<()>),
         (toggle_read, Result<()>),
         (toggle_read_mode, Result<()>),
+        (toggle_noteworthy, Result<()>),
         (update_current_feed_and_entries, Result<()>),
         (select_and_show_current_entry, Result<()>),
         (on_snap_to_top, Result<()>),
@@ -529,6 +530,30 @@ impl AppImpl {
     pub fn feed_ids(&self) -> Result<Vec<crate::rss::FeedId>> {
         let ids = crate::rss::get_feed_ids(&self.conn)?;
         Ok(ids)
+    }
+
+    pub fn toggle_noteworthy(&mut self) -> Result<()> {
+        match &self.selected {
+            Selected::Entry(entry) => {
+                entry.toggle_noteworthy(&self.conn)?;
+                self.selected = Selected::Entries;
+                self.update_current_entries()?;
+                self.update_current_entry_meta()?;
+                self.entry_scroll_position = 0;
+            }
+            Selected::Entries => {
+                if let Some(entry_meta) = &self.current_entry_meta {
+                    entry_meta.toggle_noteworthy(&self.conn)?;
+                    self.update_current_entries()?;
+                    self.update_current_entry_meta()?;
+                    self.update_entry_selection_position();
+                }
+            }
+            Selected::Feeds => (),
+            Selected::None => (),
+        }
+
+        Ok(())
     }
 
     pub fn toggle_read(&mut self) -> Result<()> {

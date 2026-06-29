@@ -227,6 +227,7 @@ pub struct EntryMetadata {
     pub link: Option<String>,
     pub read_at: Option<chrono::DateTime<Utc>>,
     pub inserted_at: chrono::DateTime<Utc>,
+    pub noteworthy: bool,
     // unused:
     // pub updated_at: chrono::DateTime<Utc>,
 }
@@ -249,6 +250,13 @@ impl EntryMetadata {
     fn mark_as_unread(&self, conn: &rusqlite::Connection) -> Result<()> {
         let mut statement = conn.prepare("UPDATE entries SET read_at = NULL WHERE id = ?1")?;
         statement.execute([self.id])?;
+        Ok(())
+    }
+
+    pub fn toggle_noteworthy(&self, conn: &rusqlite::Connection) -> Result<()> {
+        let new_noteworthy = if self.noteworthy { 0 } else { 1 };
+        let mut statement = conn.prepare("UPDATE entries SET noteworthy = ?2 WHERE id = ?1")?;
+        statement.execute(params![self.id, new_noteworthy])?;
         Ok(())
     }
 }
@@ -531,6 +539,15 @@ pub fn initialize_db(conn: &mut rusqlite::Connection) -> Result<()> {
             )?;
         }
 
+        if schema_version <= 3 {
+            tx.pragma_update(None, "user_version", 4)?;
+
+            tx.execute(
+                "ALTER TABLE entries ADD COLUMN noteworthy INTEGER DEFAULT 0",
+                [],
+            )?;
+        }
+
         Ok(())
     })
 }
@@ -713,7 +730,8 @@ pub fn get_entry_meta(conn: &rusqlite::Connection, entry_id: EntryId) -> Result<
           pub_date,
           link,
           read_at,
-          inserted_at
+          inserted_at,
+          noteworthy
           -- updated_at
         FROM entries WHERE id=?1",
         [entry_id],
@@ -727,6 +745,7 @@ pub fn get_entry_meta(conn: &rusqlite::Connection, entry_id: EntryId) -> Result<
                 link: row.get(4)?,
                 read_at: row.get(5)?,
                 inserted_at: row.get(6)?,
+                noteworthy: row.get::<_, i32>(7)? != 0,
                 // updated_at: row.get(8)?,
             })
         },
@@ -771,7 +790,8 @@ pub fn get_entries_metas(
         pub_date,
         link,
         read_at,
-        inserted_at
+        inserted_at,
+        noteworthy
         -- updated_at
         FROM entries 
         WHERE feed_id=?1"
@@ -793,6 +813,7 @@ pub fn get_entries_metas(
             link: row.get(4)?,
             read_at: row.get(5)?,
             inserted_at: row.get(6)?,
+            noteworthy: row.get::<_, i32>(7)? != 0,
             // unused:
             // updated_at: row.get(8)?,
         })
@@ -943,5 +964,31 @@ mod tests {
 
         // assert that no further entries have been inserted
         assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn test_toggle_noteworthy() {
+        let http_client = ureq::AgentBuilder::new()
+            .timeout_read(std::time::Duration::from_secs(5))
+            .build();
+        let mut conn = rusqlite::Connection::open_in_memory().unwrap();
+        initialize_db(&mut conn).unwrap();
+        subscribe_to_feed(&http_client, &mut conn, ZCT).unwrap();
+        
+        let feed_id = FeedId::from(1);
+        let entries = get_entries_metas(&conn, &ReadMode::ShowUnread, feed_id).unwrap();
+        assert!(!entries.is_empty());
+        
+        let entry = &entries[0];
+        assert!(!entry.noteworthy);
+        
+        entry.toggle_noteworthy(&conn).unwrap();
+        
+        let entry_updated = get_entry_meta(&conn, entry.id).unwrap();
+        assert!(entry_updated.noteworthy);
+        
+        entry_updated.toggle_noteworthy(&conn).unwrap();
+        let entry_updated_again = get_entry_meta(&conn, entry.id).unwrap();
+        assert!(!entry_updated_again.noteworthy);
     }
 }
