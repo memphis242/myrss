@@ -12,6 +12,7 @@ use crate::modes::{Mode, ReadMode, Selected};
 use crate::rss::EntryMetadata;
 
 const PINK: Color = Color::Rgb(255, 150, 167);
+const SOFT_BLUE: Color = Color::Rgb(135, 178, 238);
 
 pub fn predraw(f: &Frame, _mode: Mode) -> Rc<[Rect]> {
     let main_layout = Layout::default()
@@ -278,7 +279,7 @@ fn draw_feeds(f: &mut Frame, area: Rect, app: &mut AppImpl) {
 
     let feeds = match app.selected {
         Selected::Feeds => feeds
-            .highlight_style(Style::default().fg(PINK).add_modifier(Modifier::BOLD))
+            .highlight_style(Style::default().fg(SOFT_BLUE).add_modifier(Modifier::BOLD))
             .highlight_symbol("> "),
         _ => feeds,
     };
@@ -480,7 +481,7 @@ fn draw_entries(f: &mut Frame, area: Rect, app: &mut AppImpl) {
 
     let entries_titles = match app.selected {
         Selected::Entries => entries_titles
-            .highlight_style(Style::default().fg(PINK).add_modifier(Modifier::BOLD))
+            .highlight_style(Style::default().fg(SOFT_BLUE).add_modifier(Modifier::BOLD))
             .highlight_symbol("> "),
         _ => entries_titles,
     };
