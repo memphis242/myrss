@@ -14,10 +14,10 @@ use std::fmt::Display;
 use std::str::FromStr;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) struct EntryId(i64);
+pub struct EntryId(i64);
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) struct FeedId(i64);
+pub struct FeedId(i64);
 
 impl From<i64> for EntryId {
     fn from(value: i64) -> Self {

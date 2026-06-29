@@ -3,7 +3,7 @@
 use crate::ImportOptions;
 use anyhow::{Context, Result};
 
-pub(crate) fn import(options: ImportOptions) -> Result<()> {
+pub fn import(options: ImportOptions) -> Result<()> {
     let mut conn = rusqlite::Connection::open(options.database_path)?;
 
     crate::rss::initialize_db(&mut conn)?;

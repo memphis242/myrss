@@ -1,8 +1,6 @@
 #![forbid(unsafe_code)]
 
-use crate::modes::{Mode, Selected};
 use anyhow::Result;
-use app::App;
 use clap::{Parser, Subcommand};
 use crossterm::event::{self, KeyEvent, KeyEventKind};
 use crossterm::event::{Event as CEvent, KeyCode, KeyModifiers};
@@ -17,17 +15,9 @@ use std::path::PathBuf;
 use std::sync::mpsc;
 use std::{thread, time};
 
-mod app;
-mod ascii;
-mod cache;
-mod io;
-mod llm;
-mod modes;
-mod opml;
-mod rss;
-mod settings;
-mod ui;
-mod util;
+use myrss::modes::{Mode, Selected};
+use myrss::app::App;
+use myrss::{ReadOptions, ImportOptions, Event, io};
 
 fn main() -> Result<()> {
     let options = Options::parse();
@@ -46,7 +36,7 @@ fn main() -> Result<()> {
     };
 
     match validated_options {
-        ValidatedOptions::Import(options) => crate::opml::import(options),
+        ValidatedOptions::Import(options) => myrss::opml::import(options),
         ValidatedOptions::Read(options) => run_reader(options),
     }
 }
@@ -143,20 +133,6 @@ enum ValidatedOptions {
     Import(ImportOptions),
 }
 
-#[derive(Clone, Debug)]
-struct ReadOptions {
-    database_path: PathBuf,
-    tick_rate: u64,
-    flash_display_duration_seconds: time::Duration,
-    network_timeout: time::Duration,
-}
-
-#[derive(Debug)]
-struct ImportOptions {
-    database_path: PathBuf,
-    opml_path: PathBuf,
-    network_timeout: time::Duration,
-}
 
 fn get_database_path(database_path: &Option<PathBuf>) -> std::io::Result<PathBuf> {
     let database_path = if let Some(database_path) = database_path {
@@ -177,13 +153,9 @@ fn get_database_path(database_path: &Option<PathBuf>) -> std::io::Result<PathBuf
     Ok(database_path)
 }
 
-pub enum Event<I> {
-    Input(I),
-    Tick,
-}
 
 fn run_reader(options: ReadOptions) -> Result<()> {
-    let _ = crate::cache::initialize_cache_db();
+    let _ = myrss::cache::initialize_cache_db();
     enable_raw_mode()?;
 
     let mut stdout = stdout();
@@ -427,7 +399,7 @@ fn get_action(app: &App, event: Event<KeyEvent>) -> Option<Action> {
                             app.set_mode(Mode::ViewLlmLog);
                             None
                         } else if cmd == "clear_cache" {
-                            app.set_mode(Mode::Confirmation(crate::modes::ConfirmationAction::ClearCache));
+                            app.set_mode(Mode::Confirmation(myrss::modes::ConfirmationAction::ClearCache));
                             None
                         } else {
                             app.set_flash(format!("Unknown command: :{}", cmd));
@@ -458,7 +430,7 @@ fn get_action(app: &App, event: Event<KeyEvent>) -> Option<Action> {
                 match key_event.code {
                     KeyCode::Char('q') | KeyCode::Esc => {
                         app.update_settings(|s| {
-                            *s = crate::settings::load_settings();
+                            *s = myrss::settings::load_settings();
                         });
                         app.set_mode(Mode::Normal);
                         None
@@ -601,8 +573,8 @@ fn get_action(app: &App, event: Event<KeyEvent>) -> Option<Action> {
                 match key_event.code {
                     KeyCode::Char('y') | KeyCode::Char('Y') => {
                         match action {
-                            crate::modes::ConfirmationAction::ClearCache => {
-                                match crate::cache::clear_cache() {
+                            myrss::modes::ConfirmationAction::ClearCache => {
+                                match myrss::cache::clear_cache() {
                                     Ok(_) => app.set_flash("LLM request cache cleared successfully!".to_string()),
                                     Err(e) => app.set_flash(format!("Failed to clear cache: {}", e)),
                                 }

@@ -5,7 +5,7 @@ use crate::modes::Mode;
 use crate::ReadOptions;
 use anyhow::Result;
 
-pub(crate) enum Action {
+pub enum Action {
     Break,
     RefreshFeed(crate::rss::FeedId),
     RefreshFeeds(Vec<crate::rss::FeedId>),
@@ -17,7 +17,7 @@ pub(crate) enum Action {
 }
 
 /// A loop to process `io::Action` messages.
-pub(crate) fn io_loop(
+pub fn io_loop(
     app: App,
     io_tx: std::sync::mpsc::Sender<Action>,
     io_rx: std::sync::mpsc::Receiver<Action>,
