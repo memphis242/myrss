@@ -57,10 +57,12 @@ fn compute_hash<T: Hash>(t: &T) -> String {
     format!("{:x}", s.finish())
 }
 
+pub const PROMPT_VERSION: &str = "v1";
+
 /// Checks the cache for an existing summary matching the article text, model, and system prompt.
 pub fn get_cached_summary(text: &str, model: &str, system_prompt: &str) -> anyhow::Result<Option<String>> {
     let conn = Connection::open(cache_db_path())?;
-    let cache_key = compute_hash(&(text.to_string() + model + system_prompt));
+    let cache_key = compute_hash(&(PROMPT_VERSION.to_string() + text + model + system_prompt));
 
     let mut stmt = conn.prepare("SELECT response FROM llm_cache WHERE cache_key = ?1")?;
     let mut rows = stmt.query([cache_key])?;
@@ -77,7 +79,7 @@ pub fn insert_cached_summary(text: &str, model: &str, system_prompt: &str, respo
     let conn = Connection::open(cache_db_path())?;
     let text_hash = compute_hash(&text);
     let prompt_hash = compute_hash(&system_prompt);
-    let cache_key = compute_hash(&(text.to_string() + model + system_prompt));
+    let cache_key = compute_hash(&(PROMPT_VERSION.to_string() + text + model + system_prompt));
     let now = chrono::Utc::now().timestamp();
 
     conn.execute(

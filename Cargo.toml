@@ -1,5 +1,5 @@
 [package]
-name = "russ"
+name = "myrss"
 version = "0.5.0"
 authors = ["Clark Kampfe <clark.kampfe@gmail.com>"]
 edition = "2024"

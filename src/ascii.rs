@@ -161,7 +161,7 @@ pub fn render_article_with_ascii_images(
         let limit = 5_usize * 1024 * 1024;
         let response = match http_client
             .get(&url)
-            .set("User-Agent", "russ/0.5.0")
+            .set("User-Agent", "myrss/0.5.0")
             .call()
         {
             Ok(r) => r,

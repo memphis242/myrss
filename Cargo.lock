@@ -1181,6 +1181,36 @@ dependencies = [
 ]
 
 [[package]]
+name = "myrss"
+version = "0.5.0"
+dependencies = [
+ "anyhow",
+ "atom_syndication",
+ "chrono",
+ "clap",
+ "copypasta",
+ "crossterm 0.29.0",
+ "diligent-date-parser",
+ "directories",
+ "html-escape",
+ "html2text",
+ "image",
+ "num_cpus",
+ "opml",
+ "r2d2",
+ "r2d2_sqlite",
+ "ratatui",
+ "rss",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "ureq",
+ "url",
+ "webbrowser",
+ "wsl",
+]
+
+[[package]]
 name = "ndk-context"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1683,36 +1713,6 @@ dependencies = [
  "hashlink",
  "libsqlite3-sys",
  "smallvec",
-]
-
-[[package]]
-name = "russ"
-version = "0.5.0"
-dependencies = [
- "anyhow",
- "atom_syndication",
- "chrono",
- "clap",
- "copypasta",
- "crossterm 0.29.0",
- "diligent-date-parser",
- "directories",
- "html-escape",
- "html2text",
- "image",
- "num_cpus",
- "opml",
- "r2d2",
- "r2d2_sqlite",
- "ratatui",
- "rss",
- "rusqlite",
- "serde",
- "serde_json",
- "ureq",
- "url",
- "webbrowser",
- "wsl",
 ]
 
 [[package]]

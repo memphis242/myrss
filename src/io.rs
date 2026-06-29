@@ -168,15 +168,15 @@ pub(crate) fn io_loop(
                                 app.force_redraw()?;
                             }
                             Err(e) => {
+                                app.set_flash(format!("Summarization failed: {}", e));
                                 app.push_error_flash(e);
-                                app.set_flash("Summarization failed".to_string());
                                 app.force_redraw()?;
                             }
                         }
                     }
                     Err(e) => {
+                        app.set_flash(format!("Summarization failed: {}", e));
                         app.push_error_flash(e);
-                        app.set_flash("Summarization failed".to_string());
                         app.force_redraw()?;
                     }
                 }
@@ -193,8 +193,8 @@ pub(crate) fn io_loop(
                         app.force_redraw()?;
                     }
                     Err(e) => {
+                        app.set_flash(format!("Fetch models failed: {}", e));
                         app.push_error_flash(e);
-                        app.set_flash("Failed to fetch models".to_string());
                         app.force_redraw()?;
                     }
                 }

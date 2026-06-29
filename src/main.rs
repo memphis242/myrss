@@ -32,7 +32,18 @@ mod util;
 fn main() -> Result<()> {
     let options = Options::parse();
 
-    let validated_options = options.subcommand.validate()?;
+    let validated_options = match &options.subcommand {
+        Some(sub) => sub.validate()?,
+        None => {
+            let database_path = get_database_path(&None)?;
+            ValidatedOptions::Read(ReadOptions {
+                database_path,
+                tick_rate: 250,
+                flash_display_duration_seconds: time::Duration::from_secs(4),
+                network_timeout: time::Duration::from_secs(5),
+            })
+        }
+    };
 
     match validated_options {
         ValidatedOptions::Import(options) => crate::opml::import(options),
@@ -42,10 +53,10 @@ fn main() -> Result<()> {
 
 /// A TUI RSS reader with vim-like controls and a local-first, offline-first focus
 #[derive(Debug, Parser)]
-#[command(author, version, about, name = "russ")]
+#[command(author, version, about, name = "myrss")]
 struct Options {
     #[command(subcommand)]
-    subcommand: Command,
+    subcommand: Option<Command>,
 }
 
 /// Only used to take input at the boundary.
@@ -416,6 +427,7 @@ fn get_action(app: &App, event: Event<KeyEvent>) -> Option<Action> {
                             app.set_mode(Mode::ViewLlmLog);
                             None
                         } else {
+                            app.set_flash(format!("Unknown command: :{}", cmd));
                             None
                         }
                     }
@@ -484,8 +496,8 @@ fn get_action(app: &App, event: Event<KeyEvent>) -> Option<Action> {
                             8 => Some(Action::FetchModels),
                             9 => {
                                 if let Err(e) = app.save_settings() {
+                                    app.set_flash(format!("Save settings failed: {}", e));
                                     app.push_error_flash(e);
-                                    app.set_flash("Failed to save settings".to_string());
                                 } else {
                                     app.set_flash("Settings saved!".to_string());
                                 }
