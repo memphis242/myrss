@@ -10,6 +10,11 @@ pub enum Selected {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
+pub enum ConfirmationAction {
+    ClearCache,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Mode {
     Editing,
     Normal,
@@ -17,6 +22,7 @@ pub enum Mode {
     Settings,
     SettingsEditing(usize),
     ViewLlmLog,
+    Confirmation(ConfirmationAction),
 }
 
 #[derive(Clone, Debug)]

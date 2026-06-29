@@ -142,6 +142,13 @@ pub fn get_request_logs() -> anyhow::Result<Vec<RequestLogEntry>> {
     Ok(entries)
 }
 
+/// Deletes all cached summaries from the SQLite cache table.
+pub fn clear_cache() -> anyhow::Result<()> {
+    let conn = Connection::open(cache_db_path())?;
+    conn.execute("DELETE FROM llm_cache", [])?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

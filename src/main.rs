@@ -426,6 +426,9 @@ fn get_action(app: &App, event: Event<KeyEvent>) -> Option<Action> {
                             app.load_request_logs();
                             app.set_mode(Mode::ViewLlmLog);
                             None
+                        } else if cmd == "clear_cache" {
+                            app.set_mode(Mode::Confirmation(crate::modes::ConfirmationAction::ClearCache));
+                            None
                         } else {
                             app.set_flash(format!("Unknown command: :{}", cmd));
                             None
@@ -585,6 +588,32 @@ fn get_action(app: &App, event: Event<KeyEvent>) -> Option<Action> {
                         if current > 0 {
                             app.set_log_scroll_position(current - 1);
                         }
+                        None
+                    }
+                    _ => None,
+                }
+            }
+            Event::Input(_) => None,
+            Event::Tick => Some(Action::Tick),
+        },
+        Mode::Confirmation(action) => match event {
+            Event::Input(key_event) if key_event.kind == KeyEventKind::Press => {
+                match key_event.code {
+                    KeyCode::Char('y') | KeyCode::Char('Y') => {
+                        match action {
+                            crate::modes::ConfirmationAction::ClearCache => {
+                                match crate::cache::clear_cache() {
+                                    Ok(_) => app.set_flash("LLM request cache cleared successfully!".to_string()),
+                                    Err(e) => app.set_flash(format!("Failed to clear cache: {}", e)),
+                                }
+                            }
+                        }
+                        app.set_mode(Mode::Normal);
+                        None
+                    }
+                    KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
+                        app.set_flash("Clear cache cancelled".to_string());
+                        app.set_mode(Mode::Normal);
                         None
                     }
                     _ => None,

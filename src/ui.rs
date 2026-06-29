@@ -79,6 +79,23 @@ pub fn draw(f: &mut Frame, chunks: Rc<[Rect]>, app: &mut AppImpl) {
         let cmd_paragraph = Paragraph::new(cmd_text).style(Style::default().fg(Color::Yellow));
         f.render_widget(cmd_paragraph, bottom_layout[1]);
     }
+
+    if let Mode::Confirmation(action) = app.mode {
+        let size = f.area();
+        let popup_area = centered_rect(50, 15, size);
+        let question = match action {
+            crate::modes::ConfirmationAction::ClearCache => " Are you sure you want to clear the LLM request cache? (y/n) ",
+        };
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .title(Span::styled(" Confirmation Required ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)));
+        let paragraph = Paragraph::new(question)
+            .block(block)
+            .wrap(Wrap { trim: true });
+
+        f.render_widget(ratatui::widgets::Clear, popup_area);
+        f.render_widget(paragraph, popup_area);
+    }
 }
 
 fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
@@ -109,7 +126,7 @@ fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
 
 fn draw_info_column(f: &mut Frame, area: Rect, app: &mut AppImpl) {
     let mut constraints = match &app.mode {
-        Mode::Normal | Mode::Command | Mode::Settings | Mode::SettingsEditing(_) | Mode::ViewLlmLog => {
+        Mode::Normal | Mode::Command | Mode::Settings | Mode::SettingsEditing(_) | Mode::ViewLlmLog | Mode::Confirmation(_) => {
             vec![Constraint::Percentage(70), Constraint::Percentage(30)]
         }
         Mode::Editing => vec![
@@ -369,6 +386,9 @@ fn draw_help(f: &mut Frame, area: Rect, app: &mut AppImpl) {
         }
         Mode::ViewLlmLog => {
             text.push_str("j/k - scroll requests; esc/q - close log\n");
+        }
+        Mode::Confirmation(_) => {
+            text.push_str("y - confirm; n/esc - cancel\n");
         }
     }
 
