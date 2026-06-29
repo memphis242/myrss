@@ -1,5 +1,7 @@
 # russ
 
+This repository is a "clone-and-own" fork of Clark Kempfe's original [russ](https://github.com/ckampfe/russ) project, created to add personal customizations that might not align with the design goals or upstream merger criteria of the original repository.
+
 Russ is a TUI RSS/Atom reader with vim-like controls and a local-first, offline-first focus.
 
 [![Rust](https://github.com/ckampfe/russ/actions/workflows/rust.yml/badge.svg)](https://github.com/ckampfe/russ/actions/workflows/rust.yml)

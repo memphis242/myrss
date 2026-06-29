@@ -13,11 +13,21 @@ use crate::rss::EntryMetadata;
 
 const PINK: Color = Color::Rgb(255, 150, 167);
 
-pub fn predraw(f: &Frame) -> Rc<[Rect]> {
+pub fn predraw(f: &Frame, mode: Mode) -> Rc<[Rect]> {
+    let constraints = match mode {
+        Mode::Command => vec![Constraint::Min(0), Constraint::Length(1)],
+        _ => vec![Constraint::Min(0), Constraint::Length(0)],
+    };
+
+    let main_layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints(constraints)
+        .split(f.area());
+
     Layout::default()
         .constraints([Constraint::Percentage(30), Constraint::Percentage(70)].as_ref())
         .direction(Direction::Horizontal)
-        .split(f.area())
+        .split(main_layout[0])
 }
 
 pub fn draw(f: &mut Frame, chunks: Rc<[Rect]>, app: &mut AppImpl) {
@@ -32,11 +42,64 @@ pub fn draw(f: &mut Frame, chunks: Rc<[Rect]>, app: &mut AppImpl) {
         }
         Selected::None => draw_entries(f, chunks[1], app),
     }
+
+    if matches!(app.mode, Mode::Command) {
+        let bottom_layout = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Min(0), Constraint::Length(1)])
+            .split(f.area());
+
+        let cmd_text = format!(":{}", app.command_input);
+        let cmd_paragraph = Paragraph::new(cmd_text).style(Style::default().fg(Color::Yellow));
+        f.render_widget(cmd_paragraph, bottom_layout[1]);
+    }
+
+    if let Some(summary) = &app.current_summary {
+        let size = f.area();
+        let popup_area = centered_rect(70, 75, size);
+
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .title(Span::styled(" LLM Summary (Press Esc/q to close) ", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)));
+
+        let summary_paragraph = Paragraph::new(summary.as_str())
+            .block(block)
+            .wrap(Wrap { trim: false });
+
+        f.render_widget(ratatui::widgets::Clear, popup_area);
+        f.render_widget(summary_paragraph, popup_area);
+    }
+}
+
+fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
+    let popup_layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints(
+            [
+                Constraint::Percentage((100 - percent_y) / 2),
+                Constraint::Percentage(percent_y),
+                Constraint::Percentage((100 - percent_y) / 2),
+            ]
+            .as_ref(),
+        )
+        .split(r);
+
+    Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints(
+            [
+                Constraint::Percentage((100 - percent_x) / 2),
+                Constraint::Percentage(percent_x),
+                Constraint::Percentage((100 - percent_x) / 2),
+            ]
+            .as_ref(),
+        )
+        .split(popup_layout[1])[1]
 }
 
 fn draw_info_column(f: &mut Frame, area: Rect, app: &mut AppImpl) {
     let mut constraints = match &app.mode {
-        Mode::Normal => vec![Constraint::Percentage(70), Constraint::Percentage(30)],
+        Mode::Normal | Mode::Command => vec![Constraint::Percentage(70), Constraint::Percentage(30)],
         Mode::Editing => vec![
             Constraint::Percentage(60),
             Constraint::Percentage(20),
@@ -280,6 +343,10 @@ fn draw_help(f: &mut Frame, area: Rect, app: &mut AppImpl) {
         Mode::Normal => text.push_str("i - edit mode; q - exit\n"),
         Mode::Editing => {
             text.push_str("enter - fetch feed; del - delete feed\n");
+            text.push_str("esc - normal mode\n")
+        }
+        Mode::Command => {
+            text.push_str("Type command and press enter (e.g. summarize)\n");
             text.push_str("esc - normal mode\n")
         }
     }

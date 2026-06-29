@@ -12,6 +12,7 @@ pub(crate) enum Action {
     SubscribeToFeed(String),
     ClearFlash,
     RenderAsciiArticle(crate::rss::EntryId, u32),
+    SummarizeArticle(crate::rss::EntryId),
 }
 
 /// A loop to process `io::Action` messages.
@@ -136,6 +137,45 @@ pub(crate) fn io_loop(
                     }
                     Err(e) => {
                         app.push_error_flash(e);
+                        app.force_redraw()?;
+                    }
+                }
+            }
+            Action::SummarizeArticle(entry_id) => {
+                app.set_flash("Summarizing article using LLM...".to_string());
+                app.force_redraw()?;
+
+                let conn = connection_pool.get()?;
+                match crate::rss::get_entry_content(&conn, entry_id) {
+                    Ok(entry_content) => {
+                        let empty_string = String::from("No content or description tag provided.");
+                        let html = entry_content
+                            .content
+                            .as_ref()
+                            .or(entry_content.description.as_ref())
+                            .unwrap_or(&empty_string);
+
+                        let text = match html2text::from_read(html.as_bytes(), 80) {
+                            Ok(t) => t,
+                            Err(_) => html.to_string(),
+                        };
+
+                        match crate::llm::summarize_article(&text) {
+                            Ok(summary) => {
+                                app.set_current_summary(Some(summary));
+                                app.clear_flash();
+                                app.force_redraw()?;
+                            }
+                            Err(e) => {
+                                app.push_error_flash(e);
+                                app.set_flash("Summarization failed".to_string());
+                                app.force_redraw()?;
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        app.push_error_flash(e);
+                        app.set_flash("Summarization failed".to_string());
                         app.force_redraw()?;
                     }
                 }

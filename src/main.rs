@@ -20,6 +20,7 @@ use std::{thread, time};
 mod app;
 mod ascii;
 mod io;
+mod llm;
 mod modes;
 mod opml;
 mod rss;
@@ -284,6 +285,7 @@ enum Action {
     SnapToBottom,
     ToggleNoteworthy,
     OpenArticleWithAscii,
+    SummarizeArticle,
 }
 
 fn get_action(app: &App, event: Event<KeyEvent>) -> Option<Action> {
@@ -304,7 +306,10 @@ fn get_action(app: &App, event: Event<KeyEvent>) -> Option<Action> {
                             (KeyCode::Char('q'), _)
                             | (KeyCode::Char('c'), KeyModifiers::CONTROL)
                             | (KeyCode::Esc, _) => {
-                                if !app.error_flash_is_empty() {
+                                if app.current_summary().is_some() {
+                                    app.set_current_summary(None);
+                                    None
+                                } else if !app.error_flash_is_empty() {
                                     Some(Action::ClearErrorFlash)
                                 } else {
                                     Some(Action::Quit)
@@ -345,6 +350,11 @@ fn get_action(app: &App, event: Event<KeyEvent>) -> Option<Action> {
                             (KeyCode::Char('O'), _) => Some(Action::OpenArticleWithAscii),
                             (KeyCode::Char('G'), _) => Some(Action::SnapToBottom),
                             (KeyCode::Char('M'), _) => Some(Action::ToggleNoteworthy),
+                            (KeyCode::Char(':'), _) => {
+                                app.reset_command_input();
+                                app.set_mode(Mode::Command);
+                                None
+                            }
                             _ => None,
                         }
                     }
@@ -367,6 +377,42 @@ fn get_action(app: &App, event: Event<KeyEvent>) -> Option<Action> {
                     KeyCode::Backspace => Some(Action::DeleteInputChar),
                     KeyCode::Delete => Some(Action::DeleteFeed),
                     KeyCode::Esc => Some(Action::EnterNormalMode),
+                    _ => None,
+                }
+            }
+            Event::Input(_) => None,
+            Event::Tick => Some(Action::Tick),
+        },
+        Mode::Command => match event {
+            Event::Input(key_event) if key_event.kind == KeyEventKind::Press => {
+                match key_event.code {
+                    KeyCode::Enter => {
+                        let cmd = app.command_input();
+                        app.reset_command_input();
+                        app.set_mode(Mode::Normal);
+                        if cmd == "summarize" {
+                            if app.has_entries() && app.has_current_entry() {
+                                Some(Action::SummarizeArticle)
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        }
+                    }
+                    KeyCode::Char(c) => {
+                        app.push_command_char(c);
+                        None
+                    }
+                    KeyCode::Backspace => {
+                        app.pop_command_char();
+                        None
+                    }
+                    KeyCode::Esc => {
+                        app.reset_command_input();
+                        app.set_mode(Mode::Normal);
+                        None
+                    }
                     _ => None,
                 }
             }
@@ -408,6 +454,9 @@ fn update(app: &mut App, action: Action) -> Result<()> {
             if app.has_entries() && app.has_current_entry() {
                 app.open_current_article_with_ascii()?;
             }
+        }
+        Action::SummarizeArticle => {
+            app.summarize_current_entry()?;
         }
     };
 

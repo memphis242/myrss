@@ -100,6 +100,36 @@ impl App {
         inner.g_pressed_at = None;
     }
 
+    pub fn push_command_char(&self, c: char) {
+        let mut inner = self.inner.lock().unwrap();
+        inner.command_input.push(c);
+    }
+
+    pub fn pop_command_char(&self) {
+        let mut inner = self.inner.lock().unwrap();
+        inner.command_input.pop();
+    }
+
+    pub fn command_input(&self) -> String {
+        let inner = self.inner.lock().unwrap();
+        inner.command_input.clone()
+    }
+
+    pub fn reset_command_input(&self) {
+        let mut inner = self.inner.lock().unwrap();
+        inner.command_input.clear();
+    }
+
+    pub fn current_summary(&self) -> Option<String> {
+        let inner = self.inner.lock().unwrap();
+        inner.current_summary.clone()
+    }
+
+    pub fn set_current_summary(&self, summary: Option<String>) {
+        let mut inner = self.inner.lock().unwrap();
+        inner.current_summary = summary;
+    }
+
     pub fn set_entry_ascii_content(&self, text: String, entry_meta: crate::rss::EntryMetadata) {
         let mut inner = self.inner.lock().unwrap();
         inner.current_entry_text = text;
@@ -119,11 +149,20 @@ impl App {
         Ok(())
     }
 
+    pub(crate) fn summarize_current_entry(&self) -> Result<()> {
+        let inner = self.inner.lock().unwrap();
+        if let Some(entry_meta) = &inner.current_entry_meta {
+            let entry_id = entry_meta.id;
+            inner.io_tx.send(crate::io::Action::SummarizeArticle(entry_id))?;
+        }
+        Ok(())
+    }
+
     pub fn draw(&self, terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>) -> Result<()> {
         let mut inner = self.inner.lock().unwrap();
 
         terminal.draw(|f| {
-            let chunks = crate::ui::predraw(f);
+            let chunks = crate::ui::predraw(f, inner.mode);
 
             assert!(
                 chunks.len() >= 2,
@@ -236,6 +275,8 @@ pub struct AppImpl {
     io_tx: std::sync::mpsc::Sender<crate::io::Action>,
     pub is_wsl: bool,
     pub g_pressed_at: Option<std::time::Instant>,
+    pub command_input: String,
+    pub current_summary: Option<String>,
 }
 
 impl AppImpl {
@@ -287,6 +328,8 @@ impl AppImpl {
             is_wsl,
             io_tx,
             g_pressed_at: None,
+            command_input: String::new(),
+            current_summary: None,
         };
 
         app.update_feeds()?;
