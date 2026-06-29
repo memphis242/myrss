@@ -51,6 +51,18 @@ impl<T> StatefulList<T> {
     pub fn unselect(&mut self) {
         self.state.select(None);
     }
+
+    pub fn snap_to_top(&mut self) {
+        if !self.items.is_empty() {
+            self.state.select(Some(0));
+        }
+    }
+
+    pub fn snap_to_bottom(&mut self) {
+        if !self.items.is_empty() {
+            self.state.select(Some(self.items.len() - 1));
+        }
+    }
 }
 
 impl<T> From<Vec<T>> for StatefulList<T> {
@@ -78,4 +90,24 @@ pub(crate) fn set_wsl_clipboard_contents(s: &str) -> anyhow::Result<()> {
     clipboard_stdin.write_all(s.as_bytes())?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_stateful_list_snap() {
+        let mut list = StatefulList::with_items(vec![10, 20, 30, 40]);
+        assert_eq!(list.state.selected(), None);
+
+        list.snap_to_top();
+        assert_eq!(list.state.selected(), Some(0));
+
+        list.next();
+        assert_eq!(list.state.selected(), Some(1));
+
+        list.snap_to_bottom();
+        assert_eq!(list.state.selected(), Some(3));
+    }
 }

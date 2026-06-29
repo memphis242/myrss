@@ -279,6 +279,8 @@ enum Action {
     ClearErrorFlash,
     SelectAndShowCurrentEntry,
     ToggleReadStatus,
+    SnapToTop,
+    SnapToBottom,
 }
 
 fn get_action(app: &App, event: Event<KeyEvent>) -> Option<Action> {
@@ -286,48 +288,61 @@ fn get_action(app: &App, event: Event<KeyEvent>) -> Option<Action> {
         Mode::Normal => match event {
             Event::Input(key_event) if key_event.kind == KeyEventKind::Press => {
                 match (key_event.code, key_event.modifiers) {
-                    (KeyCode::Char('q'), _)
-                    | (KeyCode::Char('c'), KeyModifiers::CONTROL)
-                    | (KeyCode::Esc, _) => {
-                        if !app.error_flash_is_empty() {
-                            Some(Action::ClearErrorFlash)
+                    (KeyCode::Char('g'), _) => {
+                        if app.handle_g_keypress() {
+                            Some(Action::SnapToTop)
                         } else {
-                            Some(Action::Quit)
+                            None
                         }
                     }
-                    (KeyCode::Char('r'), KeyModifiers::NONE) => match app.selected() {
-                        Selected::Feeds => Some(Action::RefreshFeed),
-                        _ => Some(Action::ToggleReadStatus),
-                    },
-                    (KeyCode::Char('x'), KeyModifiers::NONE) => Some(Action::RefreshAll),
-                    (KeyCode::Left, _) | (KeyCode::Char('h'), _) => Some(Action::MoveLeft),
-                    (KeyCode::Right, _) | (KeyCode::Char('l'), _) => Some(Action::MoveRight),
-                    (KeyCode::Down, _) | (KeyCode::Char('j'), _) => Some(Action::MoveDown),
-                    (KeyCode::Up, _) | (KeyCode::Char('k'), _) => Some(Action::MoveUp),
-                    (KeyCode::PageUp, _) | (KeyCode::Char('u'), KeyModifiers::CONTROL) => {
-                        Some(Action::PageUp)
-                    }
-                    (KeyCode::PageDown, _) | (KeyCode::Char('d'), KeyModifiers::CONTROL) => {
-                        Some(Action::PageDown)
-                    }
-                    (KeyCode::Enter, _) => match app.selected() {
-                        Selected::Entries | Selected::Entry(_) => {
-                            if app.has_entries() && app.has_current_entry() {
-                                Some(Action::SelectAndShowCurrentEntry)
-                            } else {
-                                None
+                    other => {
+                        app.clear_g_keypress();
+                        match other {
+                            (KeyCode::Char('q'), _)
+                            | (KeyCode::Char('c'), KeyModifiers::CONTROL)
+                            | (KeyCode::Esc, _) => {
+                                if !app.error_flash_is_empty() {
+                                    Some(Action::ClearErrorFlash)
+                                } else {
+                                    Some(Action::Quit)
+                                }
                             }
+                            (KeyCode::Char('r'), KeyModifiers::NONE) => match app.selected() {
+                                Selected::Feeds => Some(Action::RefreshFeed),
+                                _ => Some(Action::ToggleReadStatus),
+                            },
+                            (KeyCode::Char('x'), KeyModifiers::NONE) => Some(Action::RefreshAll),
+                            (KeyCode::Left, _) | (KeyCode::Char('h'), _) => Some(Action::MoveLeft),
+                            (KeyCode::Right, _) | (KeyCode::Char('l'), _) => Some(Action::MoveRight),
+                            (KeyCode::Down, _) | (KeyCode::Char('j'), _) => Some(Action::MoveDown),
+                            (KeyCode::Up, _) | (KeyCode::Char('k'), _) => Some(Action::MoveUp),
+                            (KeyCode::PageUp, _) | (KeyCode::Char('u'), KeyModifiers::CONTROL) => {
+                                Some(Action::PageUp)
+                            }
+                            (KeyCode::PageDown, _) | (KeyCode::Char('d'), KeyModifiers::CONTROL) => {
+                                Some(Action::PageDown)
+                            }
+                            (KeyCode::Enter, _) => match app.selected() {
+                                Selected::Entries | Selected::Entry(_) => {
+                                    if app.has_entries() && app.has_current_entry() {
+                                        Some(Action::SelectAndShowCurrentEntry)
+                                    } else {
+                                        None
+                                    }
+                                }
+                                _ => None,
+                            },
+                            (KeyCode::Char('?'), _) => Some(Action::ToggleHelp),
+                            (KeyCode::Char('a'), _) => Some(Action::ToggleReadMode),
+                            (KeyCode::Char('e'), _) | (KeyCode::Char('i'), _) => {
+                                Some(Action::EnterEditingMode)
+                            }
+                            (KeyCode::Char('c'), _) => Some(Action::CopyLinkToClipboard),
+                            (KeyCode::Char('o'), _) => Some(Action::OpenLinkInBrowser),
+                            (KeyCode::Char('G'), _) => Some(Action::SnapToBottom),
+                            _ => None,
                         }
-                        _ => None,
-                    },
-                    (KeyCode::Char('?'), _) => Some(Action::ToggleHelp),
-                    (KeyCode::Char('a'), _) => Some(Action::ToggleReadMode),
-                    (KeyCode::Char('e'), _) | (KeyCode::Char('i'), _) => {
-                        Some(Action::EnterEditingMode)
                     }
-                    (KeyCode::Char('c'), _) => Some(Action::CopyLinkToClipboard),
-                    (KeyCode::Char('o'), _) => Some(Action::OpenLinkInBrowser),
-                    _ => None,
                 }
             }
             Event::Input(_) => None,
@@ -381,6 +396,8 @@ fn update(app: &mut App, action: Action) -> Result<()> {
         Action::EnterNormalMode => app.set_mode(Mode::Normal),
         Action::ClearErrorFlash => app.clear_error_flash(),
         Action::SelectAndShowCurrentEntry => app.select_and_show_current_entry()?,
+        Action::SnapToTop => app.on_snap_to_top()?,
+        Action::SnapToBottom => app.on_snap_to_bottom()?,
     };
 
     Ok(())

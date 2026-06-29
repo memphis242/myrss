@@ -67,7 +67,9 @@ impl App {
         (toggle_read, Result<()>),
         (toggle_read_mode, Result<()>),
         (update_current_feed_and_entries, Result<()>),
-        (select_and_show_current_entry, Result<()>)
+        (select_and_show_current_entry, Result<()>),
+        (on_snap_to_top, Result<()>),
+        (on_snap_to_bottom, Result<()>)
     ];
 
     pub fn new(
@@ -78,6 +80,23 @@ impl App {
         Ok(App {
             inner: Arc::new(Mutex::new(AppImpl::new(options, event_tx, io_tx)?)),
         })
+    }
+
+    pub fn handle_g_keypress(&self) -> bool {
+        let mut inner = self.inner.lock().unwrap();
+        if let Some(instant) = inner.g_pressed_at {
+            if instant.elapsed() < std::time::Duration::from_millis(1000) {
+                inner.g_pressed_at = None;
+                return true;
+            }
+        }
+        inner.g_pressed_at = Some(std::time::Instant::now());
+        false
+    }
+
+    pub fn clear_g_keypress(&self) {
+        let mut inner = self.inner.lock().unwrap();
+        inner.g_pressed_at = None;
     }
 
     pub fn draw(&self, terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>) -> Result<()> {
@@ -196,6 +215,7 @@ pub struct AppImpl {
     event_tx: std::sync::mpsc::Sender<crate::Event<crossterm::event::KeyEvent>>,
     io_tx: std::sync::mpsc::Sender<crate::io::Action>,
     pub is_wsl: bool,
+    pub g_pressed_at: Option<std::time::Instant>,
 }
 
 impl AppImpl {
@@ -246,6 +266,7 @@ impl AppImpl {
             event_tx,
             is_wsl,
             io_tx,
+            g_pressed_at: None,
         };
 
         app.update_feeds()?;
@@ -708,5 +729,47 @@ impl AppImpl {
 
     pub fn force_redraw(&self) -> Result<()> {
         self.event_tx.send(crate::Event::Tick).map_err(|e| e.into())
+    }
+
+    pub fn on_snap_to_top(&mut self) -> Result<()> {
+        match self.selected {
+            Selected::Feeds => {
+                self.feeds.snap_to_top();
+                self.update_current_feed_and_entries()?;
+            }
+            Selected::Entries => {
+                if !self.entries.items.is_empty() {
+                    self.entries.snap_to_top();
+                    self.entry_selection_position = self.entries.state.selected().unwrap();
+                    self.update_current_entry_meta()?;
+                }
+            }
+            Selected::Entry(_) => {
+                self.entry_scroll_position = 0;
+            }
+            Selected::None => (),
+        }
+        Ok(())
+    }
+
+    pub fn on_snap_to_bottom(&mut self) -> Result<()> {
+        match self.selected {
+            Selected::Feeds => {
+                self.feeds.snap_to_bottom();
+                self.update_current_feed_and_entries()?;
+            }
+            Selected::Entries => {
+                if !self.entries.items.is_empty() {
+                    self.entries.snap_to_bottom();
+                    self.entry_selection_position = self.entries.state.selected().unwrap();
+                    self.update_current_entry_meta()?;
+                }
+            }
+            Selected::Entry(_) => {
+                self.entry_scroll_position = self.entry_lines_len as u16;
+            }
+            Selected::None => (),
+        }
+        Ok(())
     }
 }
