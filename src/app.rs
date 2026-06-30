@@ -239,6 +239,11 @@ impl App {
         Ok(())
     }
 
+    pub fn current_entry_text(&self) -> String {
+        let inner = self.inner.lock().unwrap();
+        inner.current_entry_text.clone()
+    }
+
     pub fn fetch_models_background(&self) -> Result<()> {
         let inner = self.inner.lock().unwrap();
         inner.io_tx.send(crate::io::Action::FetchModels)?;
@@ -626,7 +631,7 @@ impl AppImpl {
         }
     }
 
-    pub(crate) fn select_and_show_current_entry(&mut self) -> Result<()> {
+    pub fn select_and_show_current_entry(&mut self) -> Result<()> {
         if let Some(entry_meta) = &self.current_entry_meta {
             let entry_meta = entry_meta.clone();
 

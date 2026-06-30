@@ -218,6 +218,25 @@ pub fn io_loop(
 
                         match crate::llm::summarize_article(&text) {
                             Ok(summary) => {
+                                // The IO path builds `text` at a fixed 80-col wrap,
+                                // but select_and_show_current_entry looks up the cache
+                                // using current_entry_text (pane-width wrap).  Write a
+                                // second cache entry under that key so the next redraw
+                                // doesn't blank the box.
+                                let entry_text = app.current_entry_text();
+                                if !entry_text.is_empty() {
+                                    let s = app.settings();
+                                    let alt_payload = crate::llm::build_prompt_payload(
+                                        &entry_text,
+                                        s.max_words_per_prompt,
+                                    );
+                                    let _ = crate::cache::insert_cached_summary(
+                                        &alt_payload,
+                                        &s.model_name,
+                                        crate::llm::SYSTEM_PROMPT,
+                                        &summary,
+                                    );
+                                }
                                 app.set_current_summary(Some(summary));
                                 app.clear_flash();
                                 app.force_redraw()?;
