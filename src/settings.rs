@@ -11,6 +11,33 @@ pub struct AppSettings {
     pub max_words_per_prompt: usize,
     pub timeout_seconds: u64,
     pub max_retries: u32,
+
+    // Chat / RAG / web-search settings. All carry `#[serde(default)]` so a
+    // `config.json` written by an older build (which lacks these keys) still
+    // deserializes instead of silently falling back to the whole default.
+    /// Enables the `:chat` feature (LLM must also be enabled/configured).
+    #[serde(default)]
+    pub chat_enabled: bool,
+    /// Env var holding the Tavily API key. Empty disables web search: the
+    /// `web_search` tool is simply not offered to the model.
+    #[serde(default)]
+    pub search_api_key_env: String,
+    /// Cosine-similarity floor for RAG chunk selection. Chunks at or above this
+    /// are injected; if none qualify the full (truncated) article is sent.
+    #[serde(default = "default_rag_similarity_threshold")]
+    pub rag_similarity_threshold: f32,
+    /// Hard cap on web-search rounds within a single chat turn, bounding latency
+    /// and token cost of the agentic loop.
+    #[serde(default = "default_max_search_iterations")]
+    pub max_search_iterations: u32,
+}
+
+fn default_rag_similarity_threshold() -> f32 {
+    0.5
+}
+
+fn default_max_search_iterations() -> u32 {
+    3
 }
 
 impl Default for AppSettings {
@@ -24,6 +51,10 @@ impl Default for AppSettings {
             max_words_per_prompt: 1500,
             timeout_seconds: 30,
             max_retries: 3,
+            chat_enabled: false,
+            search_api_key_env: "".to_string(),
+            rag_similarity_threshold: default_rag_similarity_threshold(),
+            max_search_iterations: default_max_search_iterations(),
         }
     }
 }
@@ -38,6 +69,8 @@ const MAX_RETRIES_CAP: u32 = 10;
 const MAX_REQUESTS_PER_DAY_CAP: u32 = 100_000;
 const MIN_WORDS_PER_PROMPT: usize = 1;
 const MAX_WORDS_PER_PROMPT_CAP: usize = 50_000;
+const MIN_SEARCH_ITERATIONS: u32 = 1;
+const MAX_SEARCH_ITERATIONS: u32 = 5;
 
 impl AppSettings {
     /// Clamps numeric fields into safe ranges. Applied whenever settings are
@@ -52,6 +85,16 @@ impl AppSettings {
         self.max_words_per_prompt = self
             .max_words_per_prompt
             .clamp(MIN_WORDS_PER_PROMPT, MAX_WORDS_PER_PROMPT_CAP);
+        // A cosine threshold only makes sense in [0, 1]; a NaN from a hand-edited
+        // config would make every comparison false (→ always full-context), so
+        // coerce it back to the default.
+        if !self.rag_similarity_threshold.is_finite() {
+            self.rag_similarity_threshold = default_rag_similarity_threshold();
+        }
+        self.rag_similarity_threshold = self.rag_similarity_threshold.clamp(0.0, 1.0);
+        self.max_search_iterations = self
+            .max_search_iterations
+            .clamp(MIN_SEARCH_ITERATIONS, MAX_SEARCH_ITERATIONS);
         self
     }
 }
@@ -98,6 +141,35 @@ mod tests {
         assert_eq!(s.max_words_per_prompt, 1500);
         assert_eq!(s.timeout_seconds, 30);
         assert_eq!(s.max_retries, 3);
+        assert!(!s.chat_enabled);
+        assert_eq!(s.search_api_key_env, "");
+        assert_eq!(s.rag_similarity_threshold, 0.5);
+        assert_eq!(s.max_search_iterations, 3);
+    }
+
+    #[test]
+    fn test_legacy_config_without_new_fields_still_loads() {
+        // A config.json written by a build that predates the chat feature has none
+        // of the new keys. It must still deserialize (serde defaults fill them in),
+        // not error out and silently discard the user's LLM settings.
+        let legacy = r#"{
+            "llm_enabled": true,
+            "api_key_env": "OPENAI_API_KEY",
+            "base_url": "",
+            "model_name": "openai/gpt-4o-mini",
+            "max_requests_per_day": 100,
+            "max_words_per_prompt": 1500,
+            "timeout_seconds": 30,
+            "max_retries": 3
+        }"#;
+        let s: AppSettings = serde_json::from_str(legacy).expect("legacy config must parse");
+        assert!(s.llm_enabled);
+        assert_eq!(s.model_name, "openai/gpt-4o-mini");
+        // New fields fall back to their declared defaults, not type-zero.
+        assert!(!s.chat_enabled);
+        assert_eq!(s.search_api_key_env, "");
+        assert_eq!(s.rag_similarity_threshold, 0.5);
+        assert_eq!(s.max_search_iterations, 3);
     }
 
     #[test]
@@ -123,5 +195,36 @@ mod tests {
         .clamp();
         assert_eq!(s2.timeout_seconds, MAX_TIMEOUT_SECONDS);
         assert_eq!(AppSettings::default().clamp().timeout_seconds, 30);
+    }
+
+    #[test]
+    fn test_chat_settings_are_clamped() {
+        // Out-of-range threshold and iteration count are coerced into safe bounds.
+        let s = AppSettings {
+            rag_similarity_threshold: 5.0,
+            max_search_iterations: 9_999,
+            ..AppSettings::default()
+        }
+        .clamp();
+        assert_eq!(s.rag_similarity_threshold, 1.0);
+        assert_eq!(s.max_search_iterations, MAX_SEARCH_ITERATIONS);
+
+        let s2 = AppSettings {
+            rag_similarity_threshold: -1.0,
+            max_search_iterations: 0,
+            ..AppSettings::default()
+        }
+        .clamp();
+        assert_eq!(s2.rag_similarity_threshold, 0.0);
+        assert_eq!(s2.max_search_iterations, MIN_SEARCH_ITERATIONS);
+
+        // A NaN threshold (possible via hand-edited config) resets to the default
+        // rather than poisoning every similarity comparison.
+        let s3 = AppSettings {
+            rag_similarity_threshold: f32::NAN,
+            ..AppSettings::default()
+        }
+        .clamp();
+        assert_eq!(s3.rag_similarity_threshold, 0.5);
     }
 }
