@@ -15,11 +15,12 @@ pub struct AppSettings {
     // Chat / RAG / web-search settings. All carry `#[serde(default)]` so a
     // `config.json` written by an older build (which lacks these keys) still
     // deserializes instead of silently falling back to the whole default.
-    /// Enables the `:chat` feature (LLM must also be enabled/configured).
-    #[serde(default)]
-    pub chat_enabled: bool,
-    /// Env var holding the Tavily API key. Empty disables web search: the
-    /// `web_search` tool is simply not offered to the model.
+    //
+    // `:chat` is gated on `llm_enabled` (it is an LLM feature like summarize), so
+    // there is no separate chat toggle. Web search is opt-in: setting
+    // `search_api_key_env` to the name of an env var holding a Tavily key enables
+    // the `web_search` tool; leaving it empty simply never offers the tool.
+    /// Env var holding the Tavily API key. Empty disables web search.
     #[serde(default)]
     pub search_api_key_env: String,
     /// Cosine-similarity floor for RAG chunk selection. Chunks at or above this
@@ -51,7 +52,6 @@ impl Default for AppSettings {
             max_words_per_prompt: 1500,
             timeout_seconds: 30,
             max_retries: 3,
-            chat_enabled: false,
             search_api_key_env: "".to_string(),
             rag_similarity_threshold: default_rag_similarity_threshold(),
             max_search_iterations: default_max_search_iterations(),
@@ -141,7 +141,6 @@ mod tests {
         assert_eq!(s.max_words_per_prompt, 1500);
         assert_eq!(s.timeout_seconds, 30);
         assert_eq!(s.max_retries, 3);
-        assert!(!s.chat_enabled);
         assert_eq!(s.search_api_key_env, "");
         assert_eq!(s.rag_similarity_threshold, 0.5);
         assert_eq!(s.max_search_iterations, 3);
@@ -166,7 +165,6 @@ mod tests {
         assert!(s.llm_enabled);
         assert_eq!(s.model_name, "openai/gpt-4o-mini");
         // New fields fall back to their declared defaults, not type-zero.
-        assert!(!s.chat_enabled);
         assert_eq!(s.search_api_key_env, "");
         assert_eq!(s.rag_similarity_threshold, 0.5);
         assert_eq!(s.max_search_iterations, 3);

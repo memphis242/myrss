@@ -17,6 +17,10 @@ pub enum Action {
     RenderAsciiArticle(crate::rss::EntryId, u32),
     SummarizeArticle(crate::rss::EntryId),
     FetchModels,
+    /// Load persisted chat history for an entry into the app state.
+    OpenChat(crate::rss::EntryId),
+    /// Run one chat turn (RAG + agentic loop) for an entry given the user message.
+    SendChatMessage(crate::rss::EntryId, String),
 }
 
 /// A loop to process `io::Action` messages.
@@ -180,74 +184,38 @@ pub fn io_loop(
                 app.force_redraw()?;
 
                 let conn = connection_pool.get()?;
-                match crate::rss::get_entry_content(&conn, entry_id) {
-                    Ok(entry_content) => {
-                        let empty_string = String::from("No content or description tag provided.");
-                        let mut html = entry_content
-                            .content
-                            .as_ref()
-                            .or(entry_content.description.as_ref())
-                            .unwrap_or(&empty_string)
-                            .clone();
-
-                        if let Ok(entry_meta) = crate::rss::get_entry_meta(&conn, entry_id)
-                            && let Some(link) = &entry_meta.link
-                            && crate::ascii::is_safe_url(link)
-                        {
-                            let client = app.http_client();
-                            if let Ok(resp) = crate::ascii::safe_get(
-                                &client,
-                                link,
-                                &[],
-                                crate::ascii::MAX_REDIRECTS,
-                            ) && let Ok(resp_body) =
-                                crate::ascii::read_body_capped(resp, MAX_ARTICLE_BYTES)
-                            {
-                                let cleaned_html =
-                                    crate::ascii::extract_main_article_content(&resp_body);
-                                if !cleaned_html.trim().is_empty() {
-                                    html = cleaned_html;
-                                }
+                match fetch_article_text(&app, &conn, entry_id) {
+                    Ok(text) => match crate::summarize::summarize_article(&text) {
+                        Ok(summary) => {
+                            // The IO path builds `text` at a fixed 80-col wrap,
+                            // but select_and_show_current_entry looks up the cache
+                            // using current_entry_text (pane-width wrap).  Write a
+                            // second cache entry under that key so the next redraw
+                            // doesn't blank the box.
+                            let entry_text = app.current_entry_text();
+                            if !entry_text.is_empty() {
+                                let s = app.settings();
+                                let alt_payload = crate::llm::build_prompt_payload(
+                                    &entry_text,
+                                    s.max_words_per_prompt,
+                                );
+                                let _ = crate::cache::insert_cached_summary(
+                                    &alt_payload,
+                                    &s.model_name,
+                                    crate::summarize::SUMMARIZE_SYSTEM_PROMPT,
+                                    &summary,
+                                );
                             }
+                            app.set_current_summary(Some(summary));
+                            app.clear_flash();
+                            app.force_redraw()?;
                         }
-
-                        let text = match html2text::from_read(html.as_bytes(), 80) {
-                            Ok(t) => t,
-                            Err(_) => html.to_string(),
-                        };
-
-                        match crate::summarize::summarize_article(&text) {
-                            Ok(summary) => {
-                                // The IO path builds `text` at a fixed 80-col wrap,
-                                // but select_and_show_current_entry looks up the cache
-                                // using current_entry_text (pane-width wrap).  Write a
-                                // second cache entry under that key so the next redraw
-                                // doesn't blank the box.
-                                let entry_text = app.current_entry_text();
-                                if !entry_text.is_empty() {
-                                    let s = app.settings();
-                                    let alt_payload = crate::llm::build_prompt_payload(
-                                        &entry_text,
-                                        s.max_words_per_prompt,
-                                    );
-                                    let _ = crate::cache::insert_cached_summary(
-                                        &alt_payload,
-                                        &s.model_name,
-                                        crate::summarize::SUMMARIZE_SYSTEM_PROMPT,
-                                        &summary,
-                                    );
-                                }
-                                app.set_current_summary(Some(summary));
-                                app.clear_flash();
-                                app.force_redraw()?;
-                            }
-                            Err(e) => {
-                                app.set_flash(format!("Summarization failed: {}", e));
-                                app.push_error_flash(e);
-                                app.force_redraw()?;
-                            }
+                        Err(e) => {
+                            app.set_flash(format!("Summarization failed: {}", e));
+                            app.push_error_flash(e);
+                            app.force_redraw()?;
                         }
-                    }
+                    },
                     Err(e) => {
                         app.set_flash(format!("Summarization failed: {}", e));
                         app.push_error_flash(e);
@@ -277,10 +245,121 @@ pub fn io_loop(
                     }
                 }
             }
+            Action::OpenChat(entry_id) => {
+                // Ensure a session exists and load any persisted history into view.
+                let settings = app.settings();
+                let _ = crate::cache::get_or_create_chat_session(entry_id, &settings.model_name);
+                match crate::cache::load_chat_messages(entry_id) {
+                    Ok(stored) => app.set_chat_messages(stored_to_display(&stored)),
+                    Err(e) => {
+                        app.set_chat_messages(Vec::new());
+                        app.push_error_flash(e);
+                    }
+                }
+                app.force_redraw()?;
+            }
+            Action::SendChatMessage(entry_id, message) => {
+                let settings = app.settings();
+                let conn = connection_pool.get()?;
+                let result = fetch_article_text(&app, &conn, entry_id).and_then(|article_text| {
+                    let progress_app = app.clone();
+                    crate::chat::run_chat_turn(
+                        &settings,
+                        entry_id,
+                        &article_text,
+                        &message,
+                        |status: &str| {
+                            progress_app.set_flash(status.to_string());
+                            let _ = progress_app.force_redraw();
+                        },
+                    )
+                });
+                match result {
+                    Ok(answer) => {
+                        app.push_chat_message(crate::app::ChatTurn {
+                            role: "assistant".to_string(),
+                            content: answer,
+                        });
+                        app.clear_flash();
+                    }
+                    Err(e) => {
+                        let redacted = crate::llm::redact_secrets(&e.to_string());
+                        app.set_flash(format!("Chat failed: {}", redacted));
+                        app.push_error_flash(anyhow::anyhow!(redacted));
+                    }
+                }
+                // Always clear the in-flight flag so the input is usable again.
+                app.set_chat_in_flight(false);
+                app.force_redraw()?;
+            }
         }
     }
 
     Ok(())
+}
+
+/// Fetches and cleans an entry's article text the same way summarization does:
+/// the stored content/description, replaced by the live page's extracted main
+/// content when the link is SSRF-safe and fetchable, rendered to plain text at a
+/// fixed 80-column wrap.
+fn fetch_article_text(
+    app: &App,
+    conn: &rusqlite::Connection,
+    entry_id: crate::rss::EntryId,
+) -> Result<String> {
+    let entry_content = crate::rss::get_entry_content(conn, entry_id)?;
+    let empty_string = String::from("No content or description tag provided.");
+    let mut html = entry_content
+        .content
+        .as_ref()
+        .or(entry_content.description.as_ref())
+        .unwrap_or(&empty_string)
+        .clone();
+
+    if let Ok(entry_meta) = crate::rss::get_entry_meta(conn, entry_id)
+        && let Some(link) = &entry_meta.link
+        && crate::ascii::is_safe_url(link)
+    {
+        let client = app.http_client();
+        if let Ok(resp) = crate::ascii::safe_get(&client, link, &[], crate::ascii::MAX_REDIRECTS)
+            && let Ok(resp_body) = crate::ascii::read_body_capped(resp, MAX_ARTICLE_BYTES)
+        {
+            let cleaned_html = crate::ascii::extract_main_article_content(&resp_body);
+            if !cleaned_html.trim().is_empty() {
+                html = cleaned_html;
+            }
+        }
+    }
+
+    Ok(match html2text::from_read(html.as_bytes(), 80) {
+        Ok(t) => t,
+        Err(_) => html,
+    })
+}
+
+/// Maps persisted chat messages to display turns: user and non-empty assistant
+/// text turns pass through; an assistant tool-call turn becomes a "searched the
+/// web" marker; raw tool-result turns are hidden.
+fn stored_to_display(stored: &[crate::cache::StoredChatMessage]) -> Vec<crate::app::ChatTurn> {
+    let mut turns = Vec::new();
+    for m in stored {
+        match m.role.as_str() {
+            "user" => turns.push(crate::app::ChatTurn {
+                role: "user".to_string(),
+                content: m.content.clone(),
+            }),
+            "assistant" if !m.content.is_empty() => turns.push(crate::app::ChatTurn {
+                role: "assistant".to_string(),
+                content: m.content.clone(),
+            }),
+            "assistant" => turns.push(crate::app::ChatTurn {
+                role: "tool".to_string(),
+                content: "🔍 searched the web".to_string(),
+            }),
+            _ => {} // hide raw tool-result turns
+        }
+    }
+    turns
 }
 
 /// Refreshes the feeds of the given `feed_ids` by splitting them into

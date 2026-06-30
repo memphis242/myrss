@@ -29,6 +29,14 @@ macro_rules! delegate_to_locked_mut_inner {
     };
 }
 
+/// One chat turn as shown in the chat modal. `role` is `"user"`, `"assistant"`,
+/// or `"tool"` (a web-search marker); `content` is the display text.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ChatTurn {
+    pub role: String,
+    pub content: String,
+}
+
 #[derive(Clone, Debug)]
 pub struct App {
     inner: Arc<Mutex<AppImpl>>,
@@ -341,6 +349,108 @@ impl App {
         let inner = self.inner.lock().unwrap();
         inner.current_entry_meta.is_some()
     }
+
+    // ----- chat -----------------------------------------------------------
+
+    pub fn chat_messages(&self) -> Vec<ChatTurn> {
+        let inner = self.inner.lock().unwrap();
+        inner.chat_messages.clone()
+    }
+
+    pub fn set_chat_messages(&self, messages: Vec<ChatTurn>) {
+        let mut inner = self.inner.lock().unwrap();
+        inner.chat_messages = messages;
+    }
+
+    pub fn push_chat_message(&self, turn: ChatTurn) {
+        let mut inner = self.inner.lock().unwrap();
+        inner.chat_messages.push(turn);
+    }
+
+    pub fn chat_input(&self) -> String {
+        let inner = self.inner.lock().unwrap();
+        inner.chat_input.clone()
+    }
+
+    pub fn push_chat_char(&self, c: char) {
+        let mut inner = self.inner.lock().unwrap();
+        inner.chat_input.push(c);
+    }
+
+    pub fn pop_chat_char(&self) {
+        let mut inner = self.inner.lock().unwrap();
+        inner.chat_input.pop();
+    }
+
+    pub fn reset_chat_input(&self) {
+        let mut inner = self.inner.lock().unwrap();
+        inner.chat_input.clear();
+    }
+
+    pub fn chat_scroll_position(&self) -> u16 {
+        let inner = self.inner.lock().unwrap();
+        inner.chat_scroll_position
+    }
+
+    pub fn chat_scroll_up(&self) {
+        let mut inner = self.inner.lock().unwrap();
+        inner.chat_scroll_position = inner.chat_scroll_position.saturating_sub(1);
+    }
+
+    pub fn chat_scroll_down(&self) {
+        let mut inner = self.inner.lock().unwrap();
+        inner.chat_scroll_position = inner.chat_scroll_position.saturating_add(1);
+    }
+
+    pub fn chat_in_flight(&self) -> bool {
+        let inner = self.inner.lock().unwrap();
+        inner.chat_in_flight
+    }
+
+    pub fn set_chat_in_flight(&self, in_flight: bool) {
+        let mut inner = self.inner.lock().unwrap();
+        inner.chat_in_flight = in_flight;
+    }
+
+    /// Opens the chat modal for the current entry: switches to `Mode::Chat` and
+    /// asks the IO thread to load any persisted history.
+    pub fn open_chat_for_current_entry(&self) -> Result<()> {
+        let mut inner = self.inner.lock().unwrap();
+        if let Some(entry_meta) = &inner.current_entry_meta {
+            let entry_id = entry_meta.id;
+            inner.mode = Mode::Chat(entry_id);
+            inner.chat_scroll_position = 0;
+            inner.chat_input.clear();
+            inner.io_tx.send(crate::io::Action::OpenChat(entry_id))?;
+        }
+        Ok(())
+    }
+
+    /// Sends the current chat input as a message (no-op if empty or a turn is
+    /// already in flight). Echoes the user turn locally and dispatches the work
+    /// to the IO thread.
+    pub fn send_chat_message(&self) -> Result<()> {
+        let mut inner = self.inner.lock().unwrap();
+        if inner.chat_in_flight {
+            return Ok(());
+        }
+        let message = inner.chat_input.trim().to_string();
+        if message.is_empty() {
+            return Ok(());
+        }
+        if let Mode::Chat(entry_id) = inner.mode {
+            inner.chat_messages.push(ChatTurn {
+                role: "user".to_string(),
+                content: message.clone(),
+            });
+            inner.chat_input.clear();
+            inner.chat_in_flight = true;
+            inner
+                .io_tx
+                .send(crate::io::Action::SendChatMessage(entry_id, message))?;
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug)]
@@ -384,6 +494,13 @@ pub struct AppImpl {
     pub available_models: Vec<String>,
     pub request_logs: Vec<crate::cache::RequestLogEntry>,
     pub log_scroll_position: usize,
+    // chat stuff
+    pub chat_messages: Vec<ChatTurn>,
+    pub chat_input: String,
+    pub chat_scroll_position: u16,
+    /// True while a chat turn is being processed on the IO thread; blocks
+    /// concurrent sends.
+    pub chat_in_flight: bool,
 }
 
 impl AppImpl {
@@ -448,6 +565,10 @@ impl AppImpl {
             available_models: Vec::new(),
             request_logs: Vec::new(),
             log_scroll_position: 0,
+            chat_messages: Vec::new(),
+            chat_input: String::new(),
+            chat_scroll_position: 0,
+            chat_in_flight: false,
         };
 
         app.update_feeds()?;

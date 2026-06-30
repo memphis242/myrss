@@ -34,6 +34,9 @@ pub fn draw(f: &mut Frame, chunks: Rc<[Rect]>, app: &mut AppImpl) {
         Mode::ViewLlmLog => {
             draw_llm_log(f, f.area(), app);
         }
+        Mode::Chat(_) => {
+            draw_chat(f, f.area(), app);
+        }
         _ => {
             draw_info_column(f, chunks[0], app);
 
@@ -86,6 +89,9 @@ pub fn draw(f: &mut Frame, chunks: Rc<[Rect]>, app: &mut AppImpl) {
             crate::modes::ConfirmationAction::ClearCache => {
                 " Are you sure you want to clear the LLM request cache? (y/n) "
             }
+            crate::modes::ConfirmationAction::ClearChat => {
+                " Are you sure you want to delete ALL saved chats? (y/n) "
+            }
         };
         let block = Block::default().borders(Borders::ALL).title(Span::styled(
             " Confirmation Required ",
@@ -135,7 +141,8 @@ fn draw_info_column(f: &mut Frame, area: Rect, app: &mut AppImpl) {
         | Mode::Settings
         | Mode::SettingsEditing(_)
         | Mode::ViewLlmLog
-        | Mode::Confirmation(_) => {
+        | Mode::Confirmation(_)
+        | Mode::Chat(_) => {
             if app.show_help {
                 vec![
                     Constraint::Min(0),
@@ -413,11 +420,15 @@ fn draw_help(f: &mut Frame, area: Rect, app: &mut AppImpl) {
         Mode::Confirmation(_) => {
             text.push_str("  y: confirm | n/esc: cancel\n");
         }
+        Mode::Chat(_) => {
+            text.push_str("  type message | enter: send | PgUp/PgDn: scroll | esc: close\n");
+        }
     }
 
     text.push_str("COMMANDS:\n");
     text.push_str("  :settings - configure | :view_llm_log - API logs\n");
     text.push_str("  :clear_cache - clear LLM cache | :summarize - AI summary\n");
+    text.push_str("  :chat - chat about article | :clear_chat - delete saved chats\n");
 
     text.push_str("? - toggle help");
 
@@ -877,6 +888,96 @@ fn draw_settings(f: &mut Frame, area: Rect, app: &mut AppImpl) {
     ));
     let models_list = List::new(model_items).block(models_block);
     f.render_widget(models_list, models_area);
+}
+
+fn draw_chat(f: &mut Frame, area: Rect, app: &mut AppImpl) {
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Min(0),    // conversation history
+            Constraint::Length(1), // status / hint line
+            Constraint::Length(3), // input box
+        ])
+        .split(area);
+
+    let title = app
+        .current_entry_meta
+        .as_ref()
+        .and_then(|m| m.title.clone())
+        .unwrap_or_else(|| "Article".to_string());
+
+    // Conversation history.
+    let mut lines: Vec<Line> = Vec::new();
+    if app.chat_messages.is_empty() {
+        lines.push(Line::from(Span::styled(
+            "Ask a question about this article. The assistant can search the web if it needs to.",
+            Style::default()
+                .fg(Color::DarkGray)
+                .add_modifier(Modifier::ITALIC),
+        )));
+    }
+    for turn in &app.chat_messages {
+        match turn.role.as_str() {
+            "user" => {
+                lines.push(Line::from(Span::styled(
+                    "You:",
+                    Style::default().fg(SOFT_BLUE).add_modifier(Modifier::BOLD),
+                )));
+                for l in turn.content.lines() {
+                    lines.push(Line::from(l.to_string()));
+                }
+            }
+            "assistant" => {
+                lines.push(Line::from(Span::styled(
+                    "Assistant:",
+                    Style::default().fg(PINK).add_modifier(Modifier::BOLD),
+                )));
+                for l in turn.content.lines() {
+                    lines.push(Line::from(l.to_string()));
+                }
+            }
+            _ => {
+                lines.push(Line::from(Span::styled(
+                    turn.content.clone(),
+                    Style::default()
+                        .fg(Color::DarkGray)
+                        .add_modifier(Modifier::ITALIC),
+                )));
+            }
+        }
+        lines.push(Line::from(""));
+    }
+
+    let history = Paragraph::new(Text::from(lines))
+        .block(Block::default().borders(Borders::ALL).title(Span::styled(
+            format!(" Chat — {title} "),
+            Style::default().fg(PINK).add_modifier(Modifier::BOLD),
+        )))
+        .wrap(Wrap { trim: false })
+        .scroll((app.chat_scroll_position, 0));
+    f.render_widget(history, chunks[0]);
+
+    // Status / hint line.
+    let status = if app.chat_in_flight {
+        app.flash.clone().unwrap_or_else(|| "Working…".to_string())
+    } else {
+        "Enter: send  ·  PgUp/PgDn: scroll  ·  Esc: close".to_string()
+    };
+    let status_paragraph = Paragraph::new(status).style(Style::default().fg(Color::DarkGray));
+    f.render_widget(status_paragraph, chunks[1]);
+
+    // Input box.
+    let input = Paragraph::new(app.chat_input.as_str())
+        .style(Style::default().fg(Color::Yellow))
+        .block(
+            Block::default().borders(Borders::ALL).title(Span::styled(
+                " Message ",
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            )),
+        );
+    f.render_widget(input, chunks[2]);
 }
 
 fn draw_llm_log(f: &mut Frame, area: Rect, app: &mut AppImpl) {

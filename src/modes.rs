@@ -12,6 +12,7 @@ pub enum Selected {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ConfirmationAction {
     ClearCache,
+    ClearChat,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -23,6 +24,8 @@ pub enum Mode {
     SettingsEditing(usize),
     ViewLlmLog,
     Confirmation(ConfirmationAction),
+    /// Full-screen chat about the article with the given entry id.
+    Chat(crate::rss::EntryId),
 }
 
 #[derive(Clone, Debug)]

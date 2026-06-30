@@ -271,6 +271,8 @@ enum Action {
     OpenArticleWithAscii,
     SummarizeArticle,
     FetchModels,
+    OpenChat,
+    SendChatMessage,
 }
 
 fn get_action(app: &App, event: Event<KeyEvent>) -> Option<Action> {
@@ -366,67 +368,91 @@ fn get_action(app: &App, event: Event<KeyEvent>) -> Option<Action> {
             Event::Input(_) => None,
             Event::Tick => Some(Action::Tick),
         },
-        Mode::Command => {
-            match event {
-                Event::Input(key_event) if key_event.kind == KeyEventKind::Press => {
-                    match key_event.code {
-                        KeyCode::Enter => {
-                            let cmd = app.command_input();
-                            app.reset_command_input();
-                            app.set_mode(Mode::Normal);
-                            if cmd == "summarize" {
-                                let settings = app.settings();
-                                if !settings.llm_enabled {
-                                    app.set_flash("LLM summarization is disabled. Run :settings to enable it.".to_string());
-                                    None
-                                } else if settings.api_key_env.is_empty()
-                                    || settings.model_name.is_empty()
-                                {
-                                    app.set_flash("LLM Summarization requires API key env and model to be configured in :settings.".to_string());
-                                    None
-                                } else if app.has_entries() && app.has_current_entry() {
-                                    Some(Action::SummarizeArticle)
-                                } else {
-                                    None
-                                }
-                            } else if cmd == "settings" {
-                                app.set_settings_cursor(0);
-                                app.set_mode(Mode::Settings);
+        Mode::Command => match event {
+            Event::Input(key_event) if key_event.kind == KeyEventKind::Press => {
+                match key_event.code {
+                    KeyCode::Enter => {
+                        let cmd = app.command_input();
+                        app.reset_command_input();
+                        app.set_mode(Mode::Normal);
+                        if cmd == "summarize" {
+                            let settings = app.settings();
+                            if !settings.llm_enabled {
+                                app.set_flash(
+                                    "LLM summarization is disabled. Run :settings to enable it."
+                                        .to_string(),
+                                );
                                 None
-                            } else if cmd == "view_llm_log" {
-                                app.load_request_logs();
-                                app.set_mode(Mode::ViewLlmLog);
+                            } else if settings.api_key_env.is_empty()
+                                || settings.model_name.is_empty()
+                            {
+                                app.set_flash("LLM Summarization requires API key env and model to be configured in :settings.".to_string());
                                 None
-                            } else if cmd == "clear_cache" {
-                                app.set_mode(Mode::Confirmation(
-                                    myrss::modes::ConfirmationAction::ClearCache,
-                                ));
-                                None
+                            } else if app.has_entries() && app.has_current_entry() {
+                                Some(Action::SummarizeArticle)
                             } else {
-                                app.set_flash(format!("Unknown command: :{}", cmd));
                                 None
                             }
-                        }
-                        KeyCode::Char(c) => {
-                            app.push_command_char(c);
+                        } else if cmd == "settings" {
+                            app.set_settings_cursor(0);
+                            app.set_mode(Mode::Settings);
+                            None
+                        } else if cmd == "view_llm_log" {
+                            app.load_request_logs();
+                            app.set_mode(Mode::ViewLlmLog);
+                            None
+                        } else if cmd == "clear_cache" {
+                            app.set_mode(Mode::Confirmation(
+                                myrss::modes::ConfirmationAction::ClearCache,
+                            ));
+                            None
+                        } else if cmd == "chat" {
+                            let settings = app.settings();
+                            if !settings.llm_enabled {
+                                app.set_flash(
+                                    "LLM is disabled. Run :settings to enable it.".to_string(),
+                                );
+                                None
+                            } else if settings.api_key_env.is_empty()
+                                || settings.model_name.is_empty()
+                            {
+                                app.set_flash("Chat requires API key env and model to be configured in :settings.".to_string());
+                                None
+                            } else if app.has_entries() && app.has_current_entry() {
+                                Some(Action::OpenChat)
+                            } else {
+                                app.set_flash("Open an article first, then run :chat.".to_string());
+                                None
+                            }
+                        } else if cmd == "clear_chat" {
+                            app.set_mode(Mode::Confirmation(
+                                myrss::modes::ConfirmationAction::ClearChat,
+                            ));
+                            None
+                        } else {
+                            app.set_flash(format!("Unknown command: :{}", cmd));
                             None
                         }
-                        KeyCode::Backspace => {
-                            app.pop_command_char();
-                            None
-                        }
-                        KeyCode::Esc => {
-                            app.reset_command_input();
-                            app.set_mode(Mode::Normal);
-                            None
-                        }
-                        _ => None,
                     }
+                    KeyCode::Char(c) => {
+                        app.push_command_char(c);
+                        None
+                    }
+                    KeyCode::Backspace => {
+                        app.pop_command_char();
+                        None
+                    }
+                    KeyCode::Esc => {
+                        app.reset_command_input();
+                        app.set_mode(Mode::Normal);
+                        None
+                    }
+                    _ => None,
                 }
-                Event::Input(_) => None,
-                Event::Tick => Some(Action::Tick),
             }
-        }
+            Event::Input(_) => None,
+            Event::Tick => Some(Action::Tick),
+        },
         Mode::Settings => match event {
             Event::Input(key_event) if key_event.kind == KeyEventKind::Press => {
                 match key_event.code {
@@ -585,13 +611,53 @@ fn get_action(app: &App, event: Event<KeyEvent>) -> Option<Action> {
                                     }
                                 }
                             }
+                            myrss::modes::ConfirmationAction::ClearChat => {
+                                match myrss::cache::clear_chat_history() {
+                                    Ok(_) => app.set_flash("All saved chats deleted.".to_string()),
+                                    Err(e) => {
+                                        app.set_flash(format!("Failed to clear chats: {}", e))
+                                    }
+                                }
+                            }
                         }
                         app.set_mode(Mode::Normal);
                         None
                     }
                     KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
-                        app.set_flash("Clear cache cancelled".to_string());
+                        app.set_flash("Cancelled".to_string());
                         app.set_mode(Mode::Normal);
+                        None
+                    }
+                    _ => None,
+                }
+            }
+            Event::Input(_) => None,
+            Event::Tick => Some(Action::Tick),
+        },
+        Mode::Chat(_) => match event {
+            Event::Input(key_event) if key_event.kind == KeyEventKind::Press => {
+                match (key_event.code, key_event.modifiers) {
+                    (KeyCode::Esc, _) => {
+                        app.set_mode(Mode::Normal);
+                        None
+                    }
+                    (KeyCode::Enter, _) => Some(Action::SendChatMessage),
+                    (KeyCode::Backspace, _) => {
+                        app.pop_chat_char();
+                        None
+                    }
+                    (KeyCode::PageUp, _) | (KeyCode::Char('u'), KeyModifiers::CONTROL) => {
+                        app.chat_scroll_up();
+                        None
+                    }
+                    (KeyCode::PageDown, _) | (KeyCode::Char('d'), KeyModifiers::CONTROL) => {
+                        app.chat_scroll_down();
+                        None
+                    }
+                    (KeyCode::Char(c), m)
+                        if m == KeyModifiers::NONE || m == KeyModifiers::SHIFT =>
+                    {
+                        app.push_chat_char(c);
                         None
                     }
                     _ => None,
@@ -641,6 +707,12 @@ fn update(app: &mut App, action: Action) -> Result<()> {
         }
         Action::FetchModels => {
             app.fetch_models_background()?;
+        }
+        Action::OpenChat => {
+            app.open_chat_for_current_entry()?;
+        }
+        Action::SendChatMessage => {
+            app.send_chat_message()?;
         }
     };
 
