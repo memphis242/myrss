@@ -602,7 +602,8 @@ mod tests {
 
         // Re-inserting the same (entry, hash) replaces rather than duplicating.
         let replacement = vec![("merged paragraph".to_string(), vec![0.9f32])];
-        insert_paragraph_embeddings_conn(&mut conn, entry, "hashA", "minilm", &replacement).unwrap();
+        insert_paragraph_embeddings_conn(&mut conn, entry, "hashA", "minilm", &replacement)
+            .unwrap();
         assert_eq!(
             get_paragraph_embeddings_conn(&conn, entry, "hashA")
                 .unwrap()

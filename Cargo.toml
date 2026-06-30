@@ -35,6 +35,13 @@ image = { version = "0.25", default-features = false, features = ["png", "jpeg",
 url = "2.5"
 serde_json = "1.0"
 serde = { version = "1.0", features = ["derive"] }
+# RAG embedder. `ort` statically links ONNX Runtime into the binary (the default
+# `download-binaries` strategy fetches a *static* lib at build time and links it
+# in — no runtime .so/.dylib/.dll dependency). `tokenizers` uses the pure-Rust
+# `fancy-regex` backend rather than the native `onig` C library, keeping the
+# build self-contained.
+ort = "=2.0.0-rc.12"
+tokenizers = { version = "0.23", default-features = false, features = ["fancy-regex"] }
 
 [profile.release]
 codegen-units = 1

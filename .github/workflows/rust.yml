@@ -15,6 +15,10 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
+      with:
+        # Pull Git LFS content (the vendored ONNX model) so `include_bytes!`
+        # embeds the real model rather than an LFS pointer.
+        lfs: true
 
     - name: Install Linux dependencies
       run: sudo apt-get update && sudo apt-get install -y libxcb-shape0-dev libxcb-xfixes0-dev

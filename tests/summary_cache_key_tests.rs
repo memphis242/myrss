@@ -4,8 +4,9 @@
 /// Root cause
 /// ----------
 /// The `:summarize` IO path built `text` via `html2text(html, 80)` and stored the
-/// summary in cache under `key = hash(build_prompt_payload(text, max_words) + model
-/// + system_prompt)`.  Meanwhile, `select_and_show_current_entry` rebuilt
+/// summary in cache under
+/// `key = hash(build_prompt_payload(text, max_words) + model + system_prompt)`.
+/// Meanwhile, `select_and_show_current_entry` rebuilt
 /// `current_entry_text` from the same HTML at pane width (`entry_column_width - 2`,
 /// typically 54 on an 80-wide terminal) and then called
 /// `get_cached_summary_for_text(&current_entry_text, settings)` — which hashes a
@@ -153,8 +154,7 @@ fn regression_summary_survives_set_entry_ascii_content_recompute() {
 
     // Insert in cache under the text that set_entry_ascii_content will use.
     let settings = app.settings.clone();
-    let payload =
-        myrss::llm::build_prompt_payload(article_text, settings.max_words_per_prompt);
+    let payload = myrss::llm::build_prompt_payload(article_text, settings.max_words_per_prompt);
     myrss::cache::insert_cached_summary(
         &payload,
         &settings.model_name,

@@ -83,8 +83,12 @@ pub fn summarize_article(text: &str) -> anyhow::Result<String> {
 /// Used to repopulate the summary box on redraws.
 pub fn get_cached_summary_for_text(text: &str, settings: &AppSettings) -> Option<String> {
     let prompt_payload = llm::build_prompt_payload(text, settings.max_words_per_prompt);
-    crate::cache::get_cached_summary(&prompt_payload, &settings.model_name, SUMMARIZE_SYSTEM_PROMPT)
-        .unwrap_or(None)
+    crate::cache::get_cached_summary(
+        &prompt_payload,
+        &settings.model_name,
+        SUMMARIZE_SYSTEM_PROMPT,
+    )
+    .unwrap_or(None)
 }
 
 #[cfg(test)]

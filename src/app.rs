@@ -135,8 +135,10 @@ impl App {
         inner.current_entry_text = text;
         inner.entry_lines_len = inner.current_entry_text.matches('\n').count();
         inner.entry_scroll_position = 0;
-        inner.current_summary =
-            crate::summarize::get_cached_summary_for_text(&inner.current_entry_text, &inner.settings);
+        inner.current_summary = crate::summarize::get_cached_summary_for_text(
+            &inner.current_entry_text,
+            &inner.settings,
+        );
         inner.selected = Selected::Entry(entry_meta);
         inner.flash = None;
     }
@@ -468,11 +470,7 @@ impl AppImpl {
         f(&mut self.settings);
     }
 
-    pub fn set_entry_ascii_content(
-        &mut self,
-        text: String,
-        entry_meta: crate::rss::EntryMetadata,
-    ) {
+    pub fn set_entry_ascii_content(&mut self, text: String, entry_meta: crate::rss::EntryMetadata) {
         self.current_entry_text = text;
         self.entry_lines_len = self.current_entry_text.matches('\n').count();
         self.entry_scroll_position = 0;

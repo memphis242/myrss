@@ -1,8 +1,8 @@
 /// Regression tests for the LLM summary box truncation bug.
 ///
 /// Bug: the summary box had a hard-coded height of 7 rows (5 visible content rows
-/// + 2 border rows).  Any summary longer than 5 wrapped lines was silently cut off
-/// — the text existed in memory but was never rendered to the terminal buffer.
+/// plus 2 border rows). Any summary longer than 5 wrapped lines was silently cut
+/// off; the text existed in memory but was never rendered to the terminal buffer.
 ///
 /// Fix: `ui::summary_box_height` now computes the required height from the wrapped
 /// line count and only caps at half the available area height.
@@ -17,8 +17,8 @@
 use myrss::app::AppImpl;
 use myrss::modes::{Mode, Selected};
 use myrss::rss::{EntryId, EntryMetadata, FeedId};
-use ratatui::backend::TestBackend;
 use ratatui::Terminal;
+use ratatui::backend::TestBackend;
 use std::sync::mpsc::channel;
 
 fn make_app() -> AppImpl {
@@ -54,7 +54,7 @@ fn render_to_string(app: &mut AppImpl, width: u16, height: u16) -> String {
     let mut terminal = Terminal::new(backend).unwrap();
     terminal
         .draw(|f| {
-            let chunks = myrss::ui::predraw(f, app.mode.clone());
+            let chunks = myrss::ui::predraw(f, app.mode);
             myrss::ui::draw(f, chunks, app);
         })
         .unwrap();

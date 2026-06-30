@@ -542,10 +542,7 @@ fn draw_entry(f: &mut Frame, area: Rect, app: &mut AppImpl) {
 
         let summary_chunks = Layout::default()
             .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Length(box_height),
-                Constraint::Min(0),
-            ])
+            .constraints([Constraint::Length(box_height), Constraint::Min(0)])
             .split(area);
 
         let summary_block = Block::default().borders(Borders::ALL).title(Span::styled(
@@ -970,7 +967,7 @@ pub(crate) fn summary_box_height(summary: &str, inner_width: usize, area_height:
         .lines()
         .map(|line| {
             let cols = line.chars().count();
-            ((cols + inner_width - 1) / inner_width).max(1) as u16
+            cols.div_ceil(inner_width).max(1) as u16
         })
         .sum();
     // +2 for the top and bottom border rows

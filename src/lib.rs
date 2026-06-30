@@ -1,6 +1,8 @@
 pub mod app;
 pub mod ascii;
 pub mod cache;
+pub mod chat;
+pub mod embed;
 pub mod io;
 pub mod llm;
 pub mod modes;
