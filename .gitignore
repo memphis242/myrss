@@ -1,1 +1,4 @@
 /target
+
+# Personal TUI verification seed (snapshot of local feeds.db / ~/.myrss) — never commit
+/tests/fixtures/verify-seed/

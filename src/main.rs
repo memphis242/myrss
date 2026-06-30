@@ -291,10 +291,7 @@ fn get_action(app: &App, event: Event<KeyEvent>) -> Option<Action> {
                             (KeyCode::Char('q'), _)
                             | (KeyCode::Char('c'), KeyModifiers::CONTROL)
                             | (KeyCode::Esc, _) => {
-                                if app.current_summary().is_some() {
-                                    app.set_current_summary(None);
-                                    None
-                                } else if !app.error_flash_is_empty() {
+                                if !app.error_flash_is_empty() {
                                     Some(Action::ClearErrorFlash)
                                 } else {
                                     Some(Action::Quit)

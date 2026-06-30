@@ -135,6 +135,8 @@ impl App {
         inner.current_entry_text = text;
         inner.entry_lines_len = inner.current_entry_text.matches('\n').count();
         inner.entry_scroll_position = 0;
+        inner.current_summary =
+            crate::llm::get_cached_summary_for_text(&inner.current_entry_text, &inner.settings);
         inner.selected = Selected::Entry(entry_meta);
         inner.flash = None;
     }
@@ -450,6 +452,28 @@ impl AppImpl {
         Ok(app)
     }
 
+    pub fn current_summary(&self) -> Option<String> {
+        self.current_summary.clone()
+    }
+
+    pub fn update_settings(&mut self, f: impl FnOnce(&mut crate::settings::AppSettings)) {
+        f(&mut self.settings);
+    }
+
+    pub fn set_entry_ascii_content(
+        &mut self,
+        text: String,
+        entry_meta: crate::rss::EntryMetadata,
+    ) {
+        self.current_entry_text = text;
+        self.entry_lines_len = self.current_entry_text.matches('\n').count();
+        self.entry_scroll_position = 0;
+        self.current_summary =
+            crate::llm::get_cached_summary_for_text(&self.current_entry_text, &self.settings);
+        self.selected = Selected::Entry(entry_meta);
+        self.flash = None;
+    }
+
     pub fn delete_feed(&mut self) -> Result<()> {
         if matches!(self.selected, Selected::Feeds) && matches!(self.mode(), Mode::Editing) {
             let feed_id = self.selected_feed_id();
@@ -633,6 +657,10 @@ impl AppImpl {
                 } else {
                     self.current_entry_text = String::new();
                 }
+                self.current_summary = crate::llm::get_cached_summary_for_text(
+                    &self.current_entry_text,
+                    &self.settings,
+                );
             }
 
             self.selected = Selected::Entry(entry_meta);
@@ -848,6 +876,7 @@ impl AppImpl {
             }
             Selected::Entry(_) => {
                 self.entry_scroll_position = 0;
+                self.current_summary = None;
                 self.selected = {
                     self.current_entry_text = String::new();
                     Selected::Entries

@@ -46,25 +46,6 @@ pub fn draw(f: &mut Frame, chunks: Rc<[Rect]>, app: &mut AppImpl) {
                 }
                 Selected::None => draw_entries(f, chunks[1], app),
             }
-
-            if let Some(summary) = &app.current_summary {
-                let size = f.area();
-                let popup_area = centered_rect(70, 75, size);
-
-                let block = Block::default().borders(Borders::ALL).title(Span::styled(
-                    " LLM Summary (Press Esc/q to close) ",
-                    Style::default()
-                        .fg(Color::Cyan)
-                        .add_modifier(Modifier::BOLD),
-                ));
-
-                let summary_paragraph = Paragraph::new(summary.as_str())
-                    .block(block)
-                    .wrap(Wrap { trim: false });
-
-                f.render_widget(ratatui::widgets::Clear, popup_area);
-                f.render_widget(summary_paragraph, popup_area);
-            }
         }
     }
 
@@ -554,6 +535,29 @@ fn draw_entries(f: &mut Frame, area: Rect, app: &mut AppImpl) {
 }
 
 fn draw_entry(f: &mut Frame, area: Rect, app: &mut AppImpl) {
+    let mut article_area = area;
+    if let Some(summary) = &app.current_summary {
+        let summary_chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(7), // summary box height (including borders)
+                Constraint::Min(0),    // remaining space for article
+            ])
+            .split(area);
+
+        let summary_block = Block::default().borders(Borders::ALL).title(Span::styled(
+            " LLM Summary ",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        ));
+        let summary_paragraph = Paragraph::new(summary.as_str())
+            .block(summary_block)
+            .wrap(Wrap { trim: false });
+        f.render_widget(summary_paragraph, summary_chunks[0]);
+        article_area = summary_chunks[1];
+    }
+
     let scroll = app.entry_scroll_position;
     let entry_meta = if let Selected::Entry(e) = &app.selected {
         e
@@ -641,7 +645,7 @@ fn draw_entry(f: &mut Frame, area: Rect, app: &mut AppImpl) {
         .wrap(Wrap { trim: false })
         .scroll((scroll, 0));
 
-    let entry_chunk_height = area.height - 2;
+    let entry_chunk_height = article_area.height - 2;
 
     let progress_gauge_chunk_percent = 3;
 
@@ -681,7 +685,7 @@ fn draw_entry(f: &mut Frame, area: Rect, app: &mut AppImpl) {
                 .as_ref(),
             )
             .direction(Direction::Vertical)
-            .split(area);
+            .split(article_area);
         {
             let error_text = error_text(&app.error_flash);
             let block = Block::default().borders(Borders::ALL).title(Span::styled(
@@ -710,7 +714,7 @@ fn draw_entry(f: &mut Frame, area: Rect, app: &mut AppImpl) {
                 .as_ref(),
             )
             .direction(Direction::Vertical)
-            .split(area);
+            .split(article_area);
 
         f.render_widget(paragraph, chunks[0]);
         f.render_widget(gauge, chunks[1]);
