@@ -123,7 +123,7 @@ pub(crate) fn create_chat_tables(conn: &Connection) -> rusqlite::Result<()> {
     Ok(())
 }
 
-fn compute_hash<T: Hash>(t: &T) -> String {
+pub(crate) fn compute_hash<T: Hash>(t: &T) -> String {
     let mut s = DefaultHasher::new();
     t.hash(&mut s);
     format!("{:x}", s.finish())
