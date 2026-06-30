@@ -2,6 +2,21 @@
 
 use ratatui::widgets::ListState;
 
+/// Strips terminal control characters from text that originates from untrusted
+/// feeds before it is rendered to the terminal, preventing ANSI/OSC escape
+/// sequence injection (e.g. a feed title containing `\x1b]0;…` to rewrite the
+/// window title, or `\x1b[2J` to clear the screen).
+///
+/// Newline and tab are preserved because the renderer relies on them for layout;
+/// every other C0/C1 control character (Unicode category `Cc`, which includes
+/// `ESC`, `BEL`, and carriage return) is removed.
+pub fn sanitize_terminal_text(input: &str) -> String {
+    input
+        .chars()
+        .filter(|&c| c == '\n' || c == '\t' || !c.is_control())
+        .collect()
+}
+
 #[derive(Debug)]
 pub struct StatefulList<T> {
     pub state: ListState,
@@ -109,5 +124,18 @@ mod tests {
 
         list.snap_to_bottom();
         assert_eq!(list.state.selected(), Some(3));
+    }
+
+    #[test]
+    fn test_sanitize_terminal_text() {
+        // ESC, BEL, and C1 controls are stripped; newline and tab survive.
+        let input = "safe\u{1b}[31mred\u{7}\ttab\nnewline\u{9b}";
+        let out = sanitize_terminal_text(input);
+        assert_eq!(out, "safe[31mred\ttab\nnewline");
+        assert!(!out.contains('\u{1b}'));
+        assert!(!out.contains('\u{7}'));
+        assert!(!out.contains('\u{9b}'));
+        assert!(out.contains('\t'));
+        assert!(out.contains('\n'));
     }
 }

@@ -1,72 +1,282 @@
 use image::GenericImageView;
 use std::collections::HashMap;
 use std::io::Read;
-use std::net::{IpAddr, ToSocketAddrs};
-use url::Url;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, ToSocketAddrs};
+use url::{Host, Url};
 
-/// Checks if the given URL is safe to download from (prevents SSRF and loopback requests).
+/// Maximum number of HTTP redirects we will follow for any single fetch. Each hop
+/// is re-validated against [`is_safe_url`] to prevent redirect-based SSRF.
+pub const MAX_REDIRECTS: u32 = 5;
+
+/// Checks if the given URL is safe to fetch from, defending against SSRF.
+///
+/// Defense-in-depth notes:
+/// - Only `http`/`https` are permitted.
+/// - IP-literal hosts (including the decimal/hex/octal encodings the URL parser
+///   normalizes, e.g. `http://2130706433/`) are checked directly.
+/// - Hostnames are resolved and **every** resolved address must be public;
+///   resolution yielding zero addresses fails **closed**.
+/// - This is a pre-flight check only. DNS can rebind between this check and the
+///   actual socket connect (TOCTOU). The redirect vector is closed by
+///   [`safe_get`]; callers should prefer it over a raw agent request.
 pub fn is_safe_url(url_str: &str) -> bool {
     let url = match Url::parse(url_str) {
         Ok(u) => u,
         Err(_) => return false,
     };
 
-    // Only allow http and https protocols
+    // Only allow http and https protocols.
     if url.scheme() != "http" && url.scheme() != "https" {
         return false;
     }
 
-    let host = match url.host_str() {
-        Some(h) => h,
-        None => return false,
-    };
-
-    // Resolve domain/host to IP addresses
-    let socket_addr_str = format!("{}:80", host);
-    let addrs = match socket_addr_str.to_socket_addrs() {
-        Ok(iter) => iter,
-        Err(_) => return false,
-    };
-
-    for addr in addrs {
-        let ip = addr.ip();
-        if is_private_ip(ip) {
-            return false;
+    match url.host() {
+        // IP literal in the URL. The WHATWG host parser normalizes decimal/hex/
+        // octal IPv4 forms into an `Ipv4` host, so those encodings are covered.
+        Some(Host::Ipv4(ip)) => !is_disallowed_ip(IpAddr::V4(ip)),
+        Some(Host::Ipv6(ip)) => !is_disallowed_ip(IpAddr::V6(ip)),
+        // Hostname: resolve and require at least one address, all of them public.
+        Some(Host::Domain(host)) => {
+            let addrs = match (host, 0u16).to_socket_addrs() {
+                Ok(iter) => iter,
+                Err(_) => return false,
+            };
+            let mut resolved_any = false;
+            for addr in addrs {
+                resolved_any = true;
+                if is_disallowed_ip(addr.ip()) {
+                    return false;
+                }
+            }
+            // Fail closed if the host resolved to no addresses.
+            resolved_any
         }
+        None => false,
     }
-
-    true
 }
 
-/// Checks if an IP Address is loopback, private, or local.
-fn is_private_ip(ip: IpAddr) -> bool {
+/// Returns true if `ip` is loopback, private, link-local, or otherwise not a
+/// globally-routable public unicast address we are willing to fetch from.
+///
+/// This is intentionally a broad denylist of every special-use range because the
+/// stable standard library lacks an `is_global()` predicate.
+fn is_disallowed_ip(ip: IpAddr) -> bool {
     match ip {
-        IpAddr::V4(ipv4) => {
-            ipv4.is_loopback()
-                || ipv4.is_private()
-                || ipv4.is_link_local()
-                || ipv4.is_multicast()
-                || ipv4.is_broadcast()
-                || ipv4.is_unspecified()
-        }
-        IpAddr::V6(ipv6) => {
-            ipv6.is_loopback()
-                || ipv6.is_unspecified()
-                || (ipv6.segments()[0] & 0xfe00) == 0xfc00 // Unique Local Address (ULA)
-                || (ipv6.segments()[0] & 0xffc0) == 0xfe80 // Link-Local
-                || ipv6.is_multicast()
+        IpAddr::V4(v4) => is_disallowed_ipv4(v4),
+        IpAddr::V6(v6) => {
+            // Normalize embedded IPv4 so an attacker cannot smuggle a private
+            // IPv4 address through an IPv6 literal (e.g. `::ffff:127.0.0.1`).
+            if let Some(v4) = v6.to_ipv4_mapped() {
+                return is_disallowed_ipv4(v4);
+            }
+            // Deprecated IPv4-compatible form `::a.b.c.d` (but not pure `::`/`::1`).
+            if !v6.is_loopback()
+                && !v6.is_unspecified()
+                && let Some(v4) = v6.to_ipv4()
+            {
+                return is_disallowed_ipv4(v4);
+            }
+            is_disallowed_ipv6(v6)
         }
     }
 }
+
+fn is_disallowed_ipv4(ip: Ipv4Addr) -> bool {
+    let [a, b, c, _] = ip.octets();
+    ip.is_loopback()              // 127.0.0.0/8
+        || ip.is_private()        // 10/8, 172.16/12, 192.168/16
+        || ip.is_link_local()     // 169.254.0.0/16 (incl. metadata 169.254.169.254)
+        || ip.is_multicast()      // 224.0.0.0/4
+        || ip.is_broadcast()      // 255.255.255.255
+        || ip.is_unspecified()    // 0.0.0.0
+        || a == 0                 // 0.0.0.0/8 "this network" (0.x → localhost on some stacks)
+        || (a == 100 && (b & 0xc0) == 64) // 100.64.0.0/10 carrier-grade NAT (RFC 6598)
+        || (a == 192 && b == 0 && c == 0) // 192.0.0.0/24 IETF protocol assignments
+        || (a == 192 && b == 0 && c == 2) // 192.0.2.0/24 TEST-NET-1
+        || (a == 198 && b == 51 && c == 100) // 198.51.100.0/24 TEST-NET-2
+        || (a == 203 && b == 0 && c == 113)  // 203.0.113.0/24 TEST-NET-3
+        || (a == 198 && (b & 0xfe) == 18)    // 198.18.0.0/15 benchmarking
+        || (a & 0xf0) == 240 // 240.0.0.0/4 reserved
+}
+
+fn is_disallowed_ipv6(v6: Ipv6Addr) -> bool {
+    if v6.is_loopback() || v6.is_unspecified() || v6.is_multicast() {
+        return true;
+    }
+    let seg = v6.segments();
+    // fc00::/7 unique local addresses.
+    if (seg[0] & 0xfe00) == 0xfc00 {
+        return true;
+    }
+    // fe80::/10 link-local.
+    if (seg[0] & 0xffc0) == 0xfe80 {
+        return true;
+    }
+    // 2001:db8::/32 documentation.
+    if seg[0] == 0x2001 && seg[1] == 0x0db8 {
+        return true;
+    }
+    // 2002::/16 6to4 — validate the embedded IPv4.
+    if seg[0] == 0x2002 {
+        let embedded = Ipv4Addr::new(
+            (seg[1] >> 8) as u8,
+            (seg[1] & 0xff) as u8,
+            (seg[2] >> 8) as u8,
+            (seg[2] & 0xff) as u8,
+        );
+        if is_disallowed_ipv4(embedded) {
+            return true;
+        }
+    }
+    // 2001:0000::/32 Teredo — validate the embedded (bit-inverted) client IPv4.
+    if seg[0] == 0x2001 && seg[1] == 0x0000 {
+        let embedded = Ipv4Addr::new(
+            !(seg[6] >> 8) as u8,
+            !(seg[6] & 0xff) as u8,
+            !(seg[7] >> 8) as u8,
+            !(seg[7] & 0xff) as u8,
+        );
+        if is_disallowed_ipv4(embedded) {
+            return true;
+        }
+    }
+    false
+}
+
+/// Resolve a redirect `Location` against the URL that produced it and return the
+/// absolute target only if it passes [`is_safe_url`]. Factored out as a pure
+/// function so redirect validation is unit-testable without any network IO.
+fn safe_redirect_target(current_url: &str, location: &str) -> Option<String> {
+    let base = Url::parse(current_url).ok()?;
+    let target = base.join(location).ok()?;
+    let target_str: String = target.into();
+    if is_safe_url(&target_str) {
+        Some(target_str)
+    } else {
+        None
+    }
+}
+
+/// HTTP status codes treated as followable redirects. 304 (Not Modified) is
+/// deliberately excluded so conditional GETs (feeds) still observe a cache hit.
+const REDIRECT_STATUSES: [u16; 5] = [301, 302, 303, 307, 308];
+
+/// Perform a GET that re-validates the destination of **every** redirect hop
+/// against [`is_safe_url`], closing the redirect-based SSRF hole that a single
+/// up-front check leaves open.
+///
+/// `agent` SHOULD be built with `.redirects(0)` so that this function — not
+/// `ureq` — controls redirect following and can validate each hop. If the agent
+/// follows redirects itself, only the initial URL is guaranteed to be validated.
+pub fn safe_get(
+    agent: &ureq::Agent,
+    url: &str,
+    headers: &[(&str, &str)],
+    max_redirects: u32,
+) -> anyhow::Result<ureq::Response> {
+    if !is_safe_url(url) {
+        anyhow::bail!("refusing to fetch unsafe or private URL");
+    }
+
+    let mut current = url.to_string();
+    for _ in 0..=max_redirects {
+        let mut request = agent.get(&current);
+        for (name, value) in headers {
+            request = request.set(name, value);
+        }
+        let response = request.call()?;
+
+        if REDIRECT_STATUSES.contains(&response.status()) {
+            let location = response
+                .header("location")
+                .ok_or_else(|| anyhow::anyhow!("redirect response without a Location header"))?;
+            current = safe_redirect_target(&current, location)
+                .ok_or_else(|| anyhow::anyhow!("blocked redirect to an unsafe or private URL"))?;
+            continue;
+        }
+
+        return Ok(response);
+    }
+
+    anyhow::bail!("too many redirects while fetching the requested URL")
+}
+
+/// Read an HTTP response body as a UTF-8 string, capped at `max_bytes` to defend
+/// against memory exhaustion from a hostile server streaming an unbounded body.
+pub fn read_body_capped(response: ureq::Response, max_bytes: usize) -> anyhow::Result<String> {
+    let mut buffer = Vec::new();
+    response
+        .into_reader()
+        .take((max_bytes as u64).saturating_add(1))
+        .read_to_end(&mut buffer)?;
+    if buffer.len() > max_bytes {
+        anyhow::bail!("response body exceeded the {} byte limit", max_bytes);
+    }
+    Ok(String::from_utf8_lossy(&buffer).into_owned())
+}
+
+/// ASCII case-insensitive substring search returning a byte offset valid for
+/// `haystack` itself.
+///
+/// `haystack.to_lowercase().find(needle)` is unsafe to index back into
+/// `haystack`: lowercasing can change a string's byte length (e.g.
+/// `U+212A KELVIN SIGN` → `k`), so the returned offset can land mid-codepoint and
+/// **panic** when used to slice the original. HTML tag/attribute names are ASCII,
+/// so ASCII-only folding is sufficient and keeps the scan linear (no ReDoS).
+fn find_ascii_ci(haystack: &str, needle: &str) -> Option<usize> {
+    let hay = haystack.as_bytes();
+    let need = needle.as_bytes();
+    if need.is_empty() {
+        return Some(0);
+    }
+    if need.len() > hay.len() {
+        return None;
+    }
+    (0..=hay.len() - need.len()).find(|&i| hay[i..i + need.len()].eq_ignore_ascii_case(need))
+}
+
+/// Like [`find_ascii_ci`] but returns the offset of the **last** match.
+fn rfind_ascii_ci(haystack: &str, needle: &str) -> Option<usize> {
+    let hay = haystack.as_bytes();
+    let need = needle.as_bytes();
+    if need.is_empty() {
+        return Some(hay.len());
+    }
+    if need.len() > hay.len() {
+        return None;
+    }
+    (0..=hay.len() - need.len())
+        .rev()
+        .find(|&i| hay[i..i + need.len()].eq_ignore_ascii_case(need))
+}
+
+/// Maximum width/height (px) we will decode. Enforced via `image::Limits` so the
+/// limit applies *during* decoding, before a decompression bomb fully expands.
+const MAX_IMAGE_DIMENSION: u32 = 4096;
+/// Upper bound on memory the decoder may allocate (a 4096×4096 RGBA bitmap is
+/// ~64 MB; this leaves headroom for intermediate buffers while still bounding it).
+const MAX_IMAGE_ALLOC_BYTES: u64 = 256 * 1024 * 1024;
 
 /// Converts a buffer of image bytes to ASCII art, enforcing size checks and aspect ratio correction.
 pub fn convert_image_to_ascii(bytes: &[u8], target_width: u32) -> anyhow::Result<String> {
-    // Decode image from memory
-    let img = image::load_from_memory(bytes)?;
+    // Decode the image with explicit limits so an oversized (decompression-bomb)
+    // image is rejected *before* its full bitmap is allocated.
+    let mut reader = image::ImageReader::new(std::io::Cursor::new(bytes))
+        .with_guessed_format()
+        .map_err(|e| anyhow::anyhow!("could not determine image format: {e}"))?;
+    let mut limits = image::Limits::default();
+    limits.max_image_width = Some(MAX_IMAGE_DIMENSION);
+    limits.max_image_height = Some(MAX_IMAGE_DIMENSION);
+    limits.max_alloc = Some(MAX_IMAGE_ALLOC_BYTES);
+    reader.limits(limits);
+    let img = reader
+        .decode()
+        .map_err(|e| anyhow::anyhow!("could not decode image: {e}"))?;
 
-    // Decompression bomb protection: Reject if image is excessively large
+    // Defense-in-depth: re-check dimensions after decode in case a codec reported
+    // them late.
     let (width, height) = img.dimensions();
-    if width > 4096 || height > 4096 {
+    if width > MAX_IMAGE_DIMENSION || height > MAX_IMAGE_DIMENSION {
         anyhow::bail!("Image dimensions too large: {}x{}", width, height);
     }
 
@@ -199,11 +409,9 @@ pub fn render_article_with_ascii_images(
 
         // Limit downloads to 5MB
         let limit = 5_usize * 1024 * 1024;
-        let response = match http_client
-            .get(&url)
-            .set("User-Agent", "myrss/0.5.0")
-            .call()
-        {
+        // Use the redirect-validating fetch so an image URL cannot 30x-redirect
+        // into a private/internal address (SSRF).
+        let response = match safe_get(http_client, &url, &[], MAX_REDIRECTS) {
             Ok(r) => r,
             Err(e) => {
                 url_to_ascii.insert(url.clone(), format!("\n[Image download failed: {}]\n", e));
@@ -301,7 +509,9 @@ pub fn render_article_with_ascii_images(
         }
     }
 
-    rendered_text
+    // Strip terminal control characters so hostile feed/article content cannot
+    // inject ANSI/OSC escape sequences into the terminal.
+    crate::util::sanitize_terminal_text(&rendered_text)
 }
 
 /// Cleanses the input HTML page by removing nav, header, footer, script, and style blocks,
@@ -398,7 +608,7 @@ pub fn extract_main_article_content(html: &str) -> String {
 
     fn extract_metadata_field(html: &str, field_name: &str) -> Option<String> {
         let search_str = format!(">{}</div>", field_name);
-        if let Some(pos) = html.to_lowercase().find(&search_str.to_lowercase()) {
+        if let Some(pos) = find_ascii_ci(html, &search_str) {
             let rest = &html[pos + search_str.len()..];
             if let Some(close_li) = rest.find("</li>") {
                 let item = &rest[..close_li];
@@ -413,7 +623,7 @@ pub fn extract_main_article_content(html: &str) -> String {
 
     fn extract_reading_time(html: &str) -> Option<String> {
         let search_str = ">Reading time</div>";
-        if let Some(pos) = html.to_lowercase().find(&search_str.to_lowercase()) {
+        if let Some(pos) = find_ascii_ci(html, search_str) {
             let rest = &html[pos + search_str.len()..];
             if let Some(close_li) = rest.find("</li>") {
                 let item = &rest[..close_li];
@@ -435,7 +645,7 @@ pub fn extract_main_article_content(html: &str) -> String {
 
         while let Some(pos) = current.find("class=\"card_testimonial_col_layout\"") {
             let prefix = &current[..pos];
-            if let Some(div_start) = prefix.to_lowercase().rfind("<div") {
+            if let Some(div_start) = rfind_ascii_ci(prefix, "<div") {
                 let rest = &current[div_start..];
                 let end_open = match rest.find('>') {
                     Some(p) => div_start + p + 1,
@@ -446,8 +656,8 @@ pub fn extract_main_article_content(html: &str) -> String {
                 let mut curr_idx = end_open;
                 while depth > 0 && curr_idx < current.len() {
                     let r_str = &current[curr_idx..];
-                    let next_open = r_str.to_lowercase().find("<div");
-                    let next_close = r_str.to_lowercase().find("</div>");
+                    let next_open = find_ascii_ci(r_str, "<div");
+                    let next_close = find_ascii_ci(r_str, "</div>");
 
                     match (next_open, next_close) {
                         (Some(o), Some(c)) => {
@@ -653,7 +863,7 @@ pub fn extract_main_article_content(html: &str) -> String {
                 let classes: Vec<&str> = classes_str.split_whitespace().collect();
                 if classes.contains(&class_name) {
                     let prefix = &current[..pos];
-                    if let Some(tag_start) = prefix.to_lowercase().rfind("<div") {
+                    if let Some(tag_start) = rfind_ascii_ci(prefix, "<div") {
                         let full_rest = &current[tag_start..];
                         let end_open = match full_rest.find('>') {
                             Some(p) => tag_start + p + 1,
@@ -667,8 +877,8 @@ pub fn extract_main_article_content(html: &str) -> String {
                         let mut curr_idx = end_open;
                         while depth > 0 && curr_idx < current.len() {
                             let r_str = &current[curr_idx..];
-                            let next_open = r_str.to_lowercase().find("<div");
-                            let next_close = r_str.to_lowercase().find("</div>");
+                            let next_open = find_ascii_ci(r_str, "<div");
+                            let next_close = find_ascii_ci(r_str, "</div>");
 
                             match (next_open, next_close) {
                                 (Some(o), Some(c)) => {
@@ -707,13 +917,13 @@ pub fn extract_main_article_content(html: &str) -> String {
         let open_tag = format!("<{}", tag_name);
         let close_tag = format!("</{}", tag_name);
 
-        while let Some(pos) = current.to_lowercase().find(&open_tag) {
+        while let Some(pos) = find_ascii_ci(current, &open_tag) {
             let rest = &current[pos..];
             let end_open = match rest.find('>') {
                 Some(p) => pos + p + 1,
                 None => break,
             };
-            if let Some(end_pos) = current[end_open..].to_lowercase().find(&close_tag) {
+            if let Some(end_pos) = find_ascii_ci(&current[end_open..], &close_tag) {
                 results.push(current[end_open..end_open + end_pos].to_string());
                 current = &current[end_open + end_pos + close_tag.len() + 1..];
             } else {
@@ -747,7 +957,7 @@ fn strip_tags(html: &str, tag_name: &str) -> String {
     let mut result = String::new();
     let mut current = html;
 
-    while let Some(start_pos) = current.to_lowercase().find(&open_tag) {
+    while let Some(start_pos) = find_ascii_ci(current, &open_tag) {
         let rest = &current[start_pos..];
         let end_open_pos = match rest.find('>') {
             Some(p) => start_pos + p + 1,
@@ -756,7 +966,7 @@ fn strip_tags(html: &str, tag_name: &str) -> String {
 
         result.push_str(&current[..start_pos]);
 
-        if let Some(end_pos) = current[end_open_pos..].to_lowercase().find(&close_tag) {
+        if let Some(end_pos) = find_ascii_ci(&current[end_open_pos..], &close_tag) {
             current = &current[end_open_pos + end_pos + close_tag.len() + 1..];
         } else {
             current = "";
@@ -771,13 +981,13 @@ fn extract_by_tag(html: &str, tag_name: &str) -> Option<String> {
     let open_tag = format!("<{}", tag_name);
     let close_tag = format!("</{}", tag_name);
 
-    if let Some(start_pos) = html.to_lowercase().find(&open_tag) {
+    if let Some(start_pos) = find_ascii_ci(html, &open_tag) {
         let rest = &html[start_pos..];
         let end_open = match rest.find('>') {
             Some(p) => start_pos + p + 1,
             None => return None,
         };
-        if let Some(end_pos) = html[end_open..].to_lowercase().find(&close_tag) {
+        if let Some(end_pos) = find_ascii_ci(&html[end_open..], &close_tag) {
             return Some(html[end_open..end_open + end_pos].to_string());
         }
     }
@@ -785,9 +995,9 @@ fn extract_by_tag(html: &str, tag_name: &str) -> Option<String> {
 }
 
 fn extract_by_div_identifier(html: &str, identifier: &str) -> Option<String> {
-    if let Some(idx) = html.to_lowercase().find(identifier) {
+    if let Some(idx) = find_ascii_ci(html, identifier) {
         let prefix = &html[..idx];
-        if let Some(div_start) = prefix.to_lowercase().rfind("<div") {
+        if let Some(div_start) = rfind_ascii_ci(prefix, "<div") {
             let rest = &html[div_start..];
             let end_open = match rest.find('>') {
                 Some(p) => div_start + p + 1,
@@ -799,8 +1009,8 @@ fn extract_by_div_identifier(html: &str, identifier: &str) -> Option<String> {
 
             while depth > 0 && current < html.len() {
                 let rest_str = &html[current..];
-                let next_open = rest_str.to_lowercase().find("<div");
-                let next_close = rest_str.to_lowercase().find("</div>");
+                let next_open = find_ascii_ci(rest_str, "<div");
+                let next_close = find_ascii_ci(rest_str, "</div>");
 
                 match (next_open, next_close) {
                     (Some(o), Some(c)) => {
@@ -871,6 +1081,130 @@ mod tests {
         assert!(!is_safe_url("http://10.0.0.1/test.png"));
         assert!(!is_safe_url("file:///etc/passwd"));
         assert!(!is_safe_url("ftp://example.com/image.png"));
+    }
+
+    #[test]
+    fn test_is_safe_url_blocks_ipv4_mapped_ipv6() {
+        // A private IPv4 must not be smuggled through an IPv6 literal.
+        assert!(!is_safe_url("http://[::ffff:127.0.0.1]/x"));
+        assert!(!is_safe_url("http://[::ffff:a9fe:a9fe]/")); // 169.254.169.254
+        assert!(!is_safe_url("http://[::ffff:10.0.0.1]/"));
+    }
+
+    #[test]
+    fn test_is_safe_url_blocks_special_ranges() {
+        assert!(!is_safe_url("http://169.254.169.254/latest/meta-data/")); // cloud metadata
+        assert!(!is_safe_url("http://100.64.0.1/")); // CGNAT
+        assert!(!is_safe_url("http://0.0.0.0/")); // unspecified
+        assert!(!is_safe_url("http://0.1.2.3/")); // 0.0.0.0/8
+        assert!(!is_safe_url("http://192.0.0.1/")); // IETF protocol assignments
+        assert!(!is_safe_url("http://198.18.0.1/")); // benchmarking
+        assert!(!is_safe_url("http://240.0.0.1/")); // reserved
+        assert!(!is_safe_url("http://[::1]/")); // ipv6 loopback
+        assert!(!is_safe_url("http://[fc00::1]/")); // ULA
+        assert!(!is_safe_url("http://[fe80::1]/")); // link-local
+    }
+
+    #[test]
+    fn test_is_safe_url_blocks_decimal_encoded_loopback() {
+        // 2130706433 == 127.0.0.1; the URL parser normalizes it to an Ipv4 host.
+        assert!(!is_safe_url("http://2130706433/"));
+    }
+
+    #[test]
+    fn test_is_safe_url_blocks_6to4_embedded_private() {
+        // 2002:7f00:1:: embeds 127.0.0.1 in a 6to4 address.
+        assert!(!is_safe_url("http://[2002:7f00:1::]/"));
+    }
+
+    #[test]
+    fn test_is_safe_url_allows_public_ip_literals() {
+        assert!(is_safe_url("http://1.1.1.1/"));
+        assert!(is_safe_url("https://8.8.8.8/resolve"));
+        assert!(is_safe_url("http://[2606:4700:4700::1111]/")); // public ipv6
+    }
+
+    #[test]
+    fn test_safe_redirect_target_resolves_relative_safe() {
+        let next = safe_redirect_target("http://1.1.1.1/a/b", "/c/d");
+        assert_eq!(next.as_deref(), Some("http://1.1.1.1/c/d"));
+    }
+
+    #[test]
+    fn test_safe_redirect_target_blocks_private_hop() {
+        // A redirect into a private/metadata address is rejected.
+        assert!(safe_redirect_target("http://1.1.1.1/", "http://169.254.169.254/").is_none());
+        assert!(safe_redirect_target("http://1.1.1.1/", "http://127.0.0.1/").is_none());
+    }
+
+    #[test]
+    fn test_safe_redirect_target_blocks_scheme_downgrade() {
+        assert!(safe_redirect_target("http://1.1.1.1/", "file:///etc/passwd").is_none());
+    }
+
+    #[test]
+    fn test_read_body_capped_rejects_oversized() {
+        let big = "x".repeat(64);
+        let resp = ureq::Response::new(200, "OK", &big).unwrap();
+        assert!(read_body_capped(resp, 16).is_err());
+
+        let resp = ureq::Response::new(200, "OK", "hello").unwrap();
+        assert_eq!(read_body_capped(resp, 1024).unwrap(), "hello");
+    }
+
+    #[test]
+    fn test_convert_image_rejects_oversized_dimensions() {
+        use image::{ImageFormat, RgbImage};
+        use std::io::Cursor;
+        // 4097 px wide exceeds the 4096 decode limit, so the decoder must reject
+        // it (before allocating the full bitmap).
+        let img = RgbImage::new(4097, 1);
+        let mut png = Vec::new();
+        img.write_to(&mut Cursor::new(&mut png), ImageFormat::Png)
+            .unwrap();
+        assert!(convert_image_to_ascii(&png, 80).is_err());
+    }
+
+    #[test]
+    fn test_find_ascii_ci_offset_valid_against_multibyte() {
+        // U+212A KELVIN SIGN is 3 bytes and lowercases to ASCII 'k' (1 byte). A
+        // naive `to_lowercase().find()` returns an offset that indexes the
+        // ORIGINAL string mid-codepoint (a panic when sliced).
+        let s = "\u{212A}<DIV>x</DIV>";
+        let idx = find_ascii_ci(s, "<div").expect("tag should be found");
+        assert!(s.is_char_boundary(idx));
+        assert_eq!(&s[idx..idx + 4], "<DIV");
+        let naive = s.to_lowercase().find("<div").unwrap();
+        assert!(!s.is_char_boundary(naive)); // demonstrates the avoided panic
+    }
+
+    #[test]
+    fn test_rfind_ascii_ci_finds_last_match() {
+        assert_eq!(rfind_ascii_ci("<DIV><div>", "<div"), Some(5));
+        assert_eq!(rfind_ascii_ci("no tags here", "<div"), None);
+    }
+
+    #[test]
+    fn test_extract_main_article_content_handles_multibyte_without_panic() {
+        // Characters that shrink under lowercasing, placed next to tags, used to
+        // shift `to_lowercase().find()` offsets and panic.
+        let html = "<html><body><article><h1>\u{212A}elvin \u{2126}mega</h1>\
+            <p>Caf\u{e9} touch\u{e9}</p></article></body></html>";
+        let out = extract_main_article_content(html);
+        assert!(out.contains("elvin"));
+        assert!(out.contains("mega"));
+        assert!(out.contains("touch"));
+    }
+
+    #[test]
+    fn test_render_strips_terminal_control_chars() {
+        let html = "<p>hello\u{1b}[2Jworld\u{7}</p>";
+        let agent = ureq::Agent::new();
+        let out = render_article_with_ascii_images(&agent, html, 80);
+        assert!(!out.contains('\u{1b}'));
+        assert!(!out.contains('\u{7}'));
+        assert!(out.contains("hello"));
+        assert!(out.contains("world"));
     }
 
     #[test]
