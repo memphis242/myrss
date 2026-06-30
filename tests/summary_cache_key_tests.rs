@@ -116,7 +116,7 @@ fn regression_summary_survives_select_and_show_recompute() {
     myrss::cache::insert_cached_summary(
         &alt_payload,
         &settings.model_name,
-        myrss::llm::SYSTEM_PROMPT,
+        myrss::summarize::SUMMARIZE_SYSTEM_PROMPT,
         expected_summary,
     )
     .unwrap();
@@ -158,7 +158,7 @@ fn regression_summary_survives_set_entry_ascii_content_recompute() {
     myrss::cache::insert_cached_summary(
         &payload,
         &settings.model_name,
-        myrss::llm::SYSTEM_PROMPT,
+        myrss::summarize::SUMMARIZE_SYSTEM_PROMPT,
         expected_summary,
     )
     .unwrap();

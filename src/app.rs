@@ -136,7 +136,7 @@ impl App {
         inner.entry_lines_len = inner.current_entry_text.matches('\n').count();
         inner.entry_scroll_position = 0;
         inner.current_summary =
-            crate::llm::get_cached_summary_for_text(&inner.current_entry_text, &inner.settings);
+            crate::summarize::get_cached_summary_for_text(&inner.current_entry_text, &inner.settings);
         inner.selected = Selected::Entry(entry_meta);
         inner.flash = None;
     }
@@ -477,7 +477,7 @@ impl AppImpl {
         self.entry_lines_len = self.current_entry_text.matches('\n').count();
         self.entry_scroll_position = 0;
         self.current_summary =
-            crate::llm::get_cached_summary_for_text(&self.current_entry_text, &self.settings);
+            crate::summarize::get_cached_summary_for_text(&self.current_entry_text, &self.settings);
         self.selected = Selected::Entry(entry_meta);
         self.flash = None;
     }
@@ -670,7 +670,7 @@ impl AppImpl {
                 } else {
                     self.current_entry_text = String::new();
                 }
-                self.current_summary = crate::llm::get_cached_summary_for_text(
+                self.current_summary = crate::summarize::get_cached_summary_for_text(
                     &self.current_entry_text,
                     &self.settings,
                 );

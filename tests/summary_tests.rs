@@ -29,14 +29,14 @@ fn test_cached_summary_loading_and_retention() {
     myrss::cache::insert_cached_summary(
         &prompt_payload,
         "test-summary-model",
-        myrss::llm::SYSTEM_PROMPT,
+        myrss::summarize::SUMMARIZE_SYSTEM_PROMPT,
         expected_summary,
     )
     .unwrap();
 
     // 1. Verify get_cached_summary_for_text helper loads it
     let settings = app.settings.clone();
-    let loaded = myrss::llm::get_cached_summary_for_text(article_text, &settings);
+    let loaded = myrss::summarize::get_cached_summary_for_text(article_text, &settings);
     assert_eq!(loaded, Some(expected_summary.to_string()));
 
     // 2. Verify set_entry_ascii_content automatically resolves the cached summary

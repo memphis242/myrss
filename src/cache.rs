@@ -14,6 +14,9 @@ pub struct RequestLogEntry {
     pub finish_reason: String,
 }
 
+/// A cached chunk and its embedding vector: `(chunk_text, embedding)`.
+pub type ChunkEmbedding = (String, Vec<f32>);
+
 /// One persisted chat turn. `role` is the textual role (`system`/`user`/
 /// `assistant`/`tool`); `tool_calls` holds JSON-encoded tool calls for an
 /// assistant turn that requested tools, and `tool_call_id` links a tool-result
@@ -336,7 +339,7 @@ pub fn touch_chat_session(entry_id: EntryId) -> anyhow::Result<()> {
 pub fn get_paragraph_embeddings(
     entry_id: EntryId,
     content_hash: &str,
-) -> anyhow::Result<Option<Vec<(String, Vec<f32>)>>> {
+) -> anyhow::Result<Option<Vec<ChunkEmbedding>>> {
     let conn = Connection::open(cache_db_path())?;
     get_paragraph_embeddings_conn(&conn, entry_id, content_hash)
 }
@@ -345,7 +348,7 @@ fn get_paragraph_embeddings_conn(
     conn: &Connection,
     entry_id: EntryId,
     content_hash: &str,
-) -> anyhow::Result<Option<Vec<(String, Vec<f32>)>>> {
+) -> anyhow::Result<Option<Vec<ChunkEmbedding>>> {
     let mut stmt = conn.prepare(
         "SELECT chunk_text, embedding FROM paragraph_embeddings
          WHERE entry_id = ?1 AND content_hash = ?2 ORDER BY chunk_index ASC",
@@ -374,7 +377,7 @@ pub fn insert_paragraph_embeddings(
     entry_id: EntryId,
     content_hash: &str,
     model: &str,
-    chunks: &[(String, Vec<f32>)],
+    chunks: &[ChunkEmbedding],
 ) -> anyhow::Result<()> {
     let mut conn = Connection::open(cache_db_path())?;
     insert_paragraph_embeddings_conn(&mut conn, entry_id, content_hash, model, chunks)
@@ -385,7 +388,7 @@ fn insert_paragraph_embeddings_conn(
     entry_id: EntryId,
     content_hash: &str,
     model: &str,
-    chunks: &[(String, Vec<f32>)],
+    chunks: &[ChunkEmbedding],
 ) -> anyhow::Result<()> {
     let tx = conn.transaction()?;
     tx.execute(
@@ -610,7 +613,7 @@ mod tests {
 
     #[test]
     fn test_f32_le_bytes_roundtrip() {
-        let v = vec![0.0f32, 1.0, -1.5, f32::MIN, f32::MAX, 3.14159];
+        let v = vec![0.0f32, 1.0, -1.5, f32::MIN, f32::MAX, 123.456];
         assert_eq!(le_bytes_to_f32s(&f32s_to_le_bytes(&v)), v);
         // A corrupt trailing partial f32 is dropped, not panicked on.
         let mut bytes = f32s_to_le_bytes(&[1.0, 2.0]);

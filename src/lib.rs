@@ -7,6 +7,7 @@ pub mod modes;
 pub mod opml;
 pub mod rss;
 pub mod settings;
+pub mod summarize;
 pub mod ui;
 pub mod util;
 

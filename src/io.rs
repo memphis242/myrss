@@ -216,7 +216,7 @@ pub fn io_loop(
                             Err(_) => html.to_string(),
                         };
 
-                        match crate::llm::summarize_article(&text) {
+                        match crate::summarize::summarize_article(&text) {
                             Ok(summary) => {
                                 // The IO path builds `text` at a fixed 80-col wrap,
                                 // but select_and_show_current_entry looks up the cache
@@ -233,7 +233,7 @@ pub fn io_loop(
                                     let _ = crate::cache::insert_cached_summary(
                                         &alt_payload,
                                         &s.model_name,
-                                        crate::llm::SYSTEM_PROMPT,
+                                        crate::summarize::SUMMARIZE_SYSTEM_PROMPT,
                                         &summary,
                                     );
                                 }
