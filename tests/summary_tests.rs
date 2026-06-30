@@ -1,5 +1,4 @@
 use myrss::app::AppImpl;
-use myrss::modes::Selected;
 use std::sync::mpsc::channel;
 
 #[test]

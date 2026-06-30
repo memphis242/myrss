@@ -160,12 +160,12 @@ impl From<&atom::Entry> for IncomingEntry {
             title: {
                 let mut title = String::new();
                 decode_html_entities_to_string(entry.title(), &mut title);
-                Some(title)
+                Some(crate::util::sanitize_terminal_text(&title))
             },
             author: entry.authors().first().map(|entry_author| {
                 let mut author = String::new();
                 decode_html_entities_to_string(&entry_author.name, &mut author);
-                author
+                crate::util::sanitize_terminal_text(&author)
             }),
             pub_date: entry.published().map(|date| date.with_timezone(&Utc)),
             description: None,
@@ -187,12 +187,12 @@ impl From<&rss::Item> for IncomingEntry {
             title: entry.title().map(|entry_title| {
                 let mut title = String::new();
                 decode_html_entities_to_string(entry_title, &mut title);
-                title
+                crate::util::sanitize_terminal_text(&title)
             }),
             author: entry.author().map(|entry_author| {
                 let mut author = String::new();
                 decode_html_entities_to_string(entry_author, &mut author);
-                author
+                crate::util::sanitize_terminal_text(&author)
             }),
             pub_date: entry.pub_date().and_then(parse_datetime),
             description: entry.description().map(|entry_description| {
@@ -293,7 +293,7 @@ impl FromStr for FeedAndEntries {
         match atom::Feed::from_str(s) {
             Ok(atom_feed) => {
                 let feed = IncomingFeed {
-                    title: Some(atom_feed.title.to_string()),
+                    title: Some(crate::util::sanitize_terminal_text(&atom_feed.title)),
                     feed_link: None,
                     link: atom_feed.links.first().map(|link| link.href().to_string()),
                     feed_kind: FeedKind::Atom,
@@ -312,7 +312,7 @@ impl FromStr for FeedAndEntries {
             Err(_e) => match Channel::from_str(s) {
                 Ok(channel) => {
                     let feed = IncomingFeed {
-                        title: Some(channel.title().to_string()),
+                        title: Some(crate::util::sanitize_terminal_text(channel.title())),
                         feed_link: None,
                         link: Some(channel.link().to_string()),
                         feed_kind: FeedKind::Rss,
@@ -377,20 +377,24 @@ enum FeedResponse {
     CacheHit,
 }
 
+/// Upper bound on a feed body we will read into memory, guarding against a
+/// hostile server streaming an unbounded response.
+const MAX_FEED_BYTES: usize = 10 * 1024 * 1024;
+
 fn fetch_feed(
     http_client: &ureq::Agent,
     url: &str,
     current_etag: Option<String>,
 ) -> Result<FeedResponse> {
-    let request = http_client.get(url);
+    // Route through the SSRF-validating fetch so feed URLs (and any redirects they
+    // follow) are checked against the private/loopback denylist, and the body is
+    // size-capped. `If-None-Match` enables conditional GETs (304 cache hits).
+    let mut headers: Vec<(&str, &str)> = Vec::new();
+    if let Some(etag) = &current_etag {
+        headers.push(("If-None-Match", etag.as_str()));
+    }
 
-    let request = if let Some(etag) = current_etag {
-        request.set("If-None-Match", &etag)
-    } else {
-        request
-    };
-
-    let response = request.call()?;
+    let response = crate::ascii::safe_get(http_client, url, &headers, crate::ascii::MAX_REDIRECTS)?;
 
     match response.status() {
         // the etags did not match, it is a new feed file
@@ -405,7 +409,7 @@ fn fetch_feed(
                 .and_then(|etag_header| response.header(etag_header))
                 .map(|etag| etag.to_owned());
 
-            let content = response.into_string()?;
+            let content = crate::ascii::read_body_capped(response, MAX_FEED_BYTES)?;
 
             let mut feed_and_entries = FeedAndEntries::from_str(&content)?;
 

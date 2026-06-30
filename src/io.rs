@@ -5,6 +5,9 @@ use crate::app::App;
 use crate::modes::Mode;
 use anyhow::Result;
 
+/// Upper bound on a fetched article page we will read into memory.
+const MAX_ARTICLE_BYTES: usize = 10 * 1024 * 1024;
+
 pub enum Action {
     Break,
     RefreshFeed(crate::rss::FeedId),
@@ -137,8 +140,13 @@ pub fn io_loop(
                             let _ = app.force_redraw();
 
                             let client = app.http_client();
-                            if let Ok(resp) = client.get(link).call()
-                                && let Ok(resp_body) = resp.into_string()
+                            if let Ok(resp) = crate::ascii::safe_get(
+                                &client,
+                                link,
+                                &[],
+                                crate::ascii::MAX_REDIRECTS,
+                            ) && let Ok(resp_body) =
+                                crate::ascii::read_body_capped(resp, MAX_ARTICLE_BYTES)
                             {
                                 let cleaned_html =
                                     crate::ascii::extract_main_article_content(&resp_body);
@@ -187,8 +195,13 @@ pub fn io_loop(
                             && crate::ascii::is_safe_url(link)
                         {
                             let client = app.http_client();
-                            if let Ok(resp) = client.get(link).call()
-                                && let Ok(resp_body) = resp.into_string()
+                            if let Ok(resp) = crate::ascii::safe_get(
+                                &client,
+                                link,
+                                &[],
+                                crate::ascii::MAX_REDIRECTS,
+                            ) && let Ok(resp_body) =
+                                crate::ascii::read_body_capped(resp, MAX_ARTICLE_BYTES)
                             {
                                 let cleaned_html =
                                     crate::ascii::extract_main_article_content(&resp_body);
@@ -236,8 +249,11 @@ pub fn io_loop(
                         app.force_redraw()?;
                     }
                     Err(e) => {
-                        app.set_flash(format!("Fetch models failed: {}", e));
-                        app.push_error_flash(e);
+                        // Redact any API key the provider error may carry (e.g. the
+                        // Gemini `?key=` URL ureq embeds) before showing it.
+                        let redacted = crate::llm::redact_secrets(&e.to_string());
+                        app.set_flash(format!("Fetch models failed: {}", redacted));
+                        app.push_error_flash(anyhow::anyhow!(redacted));
                         app.force_redraw()?;
                     }
                 }

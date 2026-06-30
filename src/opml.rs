@@ -16,8 +16,11 @@ pub fn import(options: ImportOptions) -> Result<()> {
     let opml_document =
         opml::OPML::from_reader(&mut opml_reader).context("unable to parse provided OPML file")?;
 
+    // `redirects(0)` so feed fetches go through the SSRF-validating fetch layer,
+    // which validates every redirect hop rather than letting ureq follow blindly.
     let http_client = ureq::AgentBuilder::new()
         .timeout_read(options.network_timeout)
+        .redirects(0)
         .build();
 
     let feed_urls = get_feed_urls(&opml_document);

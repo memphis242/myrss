@@ -387,8 +387,11 @@ impl AppImpl {
     ) -> Result<AppImpl> {
         let mut conn = rusqlite::Connection::open(&options.database_path)?;
 
+        // `redirects(0)` so that our SSRF-validating fetch layer (`ascii::safe_get`)
+        // — not ureq — controls redirect following and can re-validate each hop.
         let http_client = ureq::AgentBuilder::new()
             .timeout_read(options.network_timeout)
+            .redirects(0)
             .user_agent("myrss/0.5.0")
             .build();
 
@@ -651,7 +654,12 @@ impl AppImpl {
                 };
 
                 if let Some(html) = entry_html {
-                    let text = html2text::from_read(html.as_bytes(), line_length.into())?;
+                    // Strip terminal control characters so hostile feed content
+                    // cannot inject ANSI/OSC escape sequences when rendered.
+                    let text = crate::util::sanitize_terminal_text(&html2text::from_read(
+                        html.as_bytes(),
+                        line_length.into(),
+                    )?);
                     self.entry_lines_len = text.matches('\n').count();
                     self.current_entry_text = text;
                 } else {
