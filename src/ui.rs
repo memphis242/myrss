@@ -537,11 +537,14 @@ fn draw_entries(f: &mut Frame, area: Rect, app: &mut AppImpl) {
 fn draw_entry(f: &mut Frame, area: Rect, app: &mut AppImpl) {
     let mut article_area = area;
     if let Some(summary) = &app.current_summary {
+        let inner_width = area.width.saturating_sub(2).max(1) as usize;
+        let box_height = summary_box_height(summary, inner_width, area.height);
+
         let summary_chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Length(7), // summary box height (including borders)
-                Constraint::Min(0),    // remaining space for article
+                Constraint::Length(box_height),
+                Constraint::Min(0),
             ])
             .split(area);
 
@@ -954,5 +957,75 @@ fn draw_llm_log(f: &mut Frame, area: Rect, app: &mut AppImpl) {
             .block(response_block)
             .wrap(Wrap { trim: false });
         f.render_widget(response_p, details_chunks[1]);
+    }
+}
+
+/// Compute the height (in terminal rows) of the LLM summary box, including its
+/// top and bottom borders.  The result is clamped: at least 4 rows (so the box
+/// is always visible) and at most half the available area height (so the article
+/// body is never completely squeezed out).
+pub(crate) fn summary_box_height(summary: &str, inner_width: usize, area_height: u16) -> u16 {
+    let inner_width = inner_width.max(1);
+    let content_lines: u16 = summary
+        .lines()
+        .map(|line| {
+            let cols = line.chars().count();
+            ((cols + inner_width - 1) / inner_width).max(1) as u16
+        })
+        .sum();
+    // +2 for the top and bottom border rows
+    (content_lines + 2).min(area_height / 2).max(4)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::summary_box_height;
+
+    // --- unit tests for the height-calculation logic ---
+
+    #[test]
+    fn short_summary_gets_minimum_height() {
+        // One line that fits entirely in the inner width → 1 content line + 2 borders = 3,
+        // but the minimum is 4.
+        let h = summary_box_height("hello", 80, 40);
+        assert_eq!(h, 4);
+    }
+
+    #[test]
+    fn multi_line_summary_height_matches_line_count() {
+        // Three explicit newlines → 3 content lines → 3 + 2 = 5 rows, well under half of 40.
+        let summary = "line one\nline two\nline three";
+        let h = summary_box_height(summary, 80, 40);
+        assert_eq!(h, 5);
+    }
+
+    #[test]
+    fn long_line_wraps_and_increases_height() {
+        // A 160-character line on a 80-column inner width wraps to 2 rows.
+        // 2 content rows + 2 borders = 4; area_height/2 = 20 → not capped.
+        let long_line = "a".repeat(160);
+        let h = summary_box_height(&long_line, 80, 40);
+        assert_eq!(h, 4); // ceil(160/80)=2 lines + 2 borders = 4, also the minimum
+    }
+
+    #[test]
+    fn very_long_summary_is_capped_at_half_area_height() {
+        // 100 lines of text, each fitting on one row → 102 rows needed, but area is 40
+        // so the cap is 40/2 = 20.
+        let summary = "short\n".repeat(100);
+        let h = summary_box_height(&summary, 80, 40);
+        assert_eq!(h, 20);
+    }
+
+    #[test]
+    fn summary_box_height_regression_fixed_7_row_truncation() {
+        // The original bug: a 6-line (≥5 visible content rows) summary was silently
+        // truncated because the box was hard-coded to 7 rows (5 content + 2 borders).
+        // With the fix, a 6-line summary must produce a box taller than 7.
+        let summary = "line 1\nline 2\nline 3\nline 4\nline 5\nline 6";
+        let h = summary_box_height(summary, 80, 40);
+        // 6 content lines + 2 borders = 8, which is > 7 (the old cap) and ≤ 20 (half of 40)
+        assert!(h > 7, "expected height > 7 (old hard-coded cap), got {h}");
+        assert_eq!(h, 8);
     }
 }

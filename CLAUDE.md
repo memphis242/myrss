@@ -72,10 +72,22 @@ override); LLM config at `~/.myrss/config.json`; summary cache at `~/.myrss/cach
 
 ## Testing Discipline
 
-- **Regression test every bug.** When a bug is found — by you or the user — write an
-  automated test that fails on the bug and passes on the fix before/with the fix.
-  Put it in `tests/` as an integration test where possible, otherwise as a unit test
-  in the relevant module. (See `tests/scrolling_tests.rs`, `tests/summary_tests.rs`.)
+- **Regression test every bug — no exceptions.** When a bug is found — by you or
+  the user — writing the regression test is part of the fix, not optional follow-up.
+  Do not mark a bug fix complete until the test exists, fails on the unfixed code,
+  and passes on the fixed code.  This applies even when the user does not explicitly
+  ask for a test.
+- **Cover all applicable levels.** For each bug, write tests at every level that
+  meaningfully exercises the defect:
+  - *Unit*: test the smallest pure function involved (extract one if needed).
+  - *Integration*: exercise the subsystem end-to-end inside the process (e.g. render
+    to a `TestBackend`, call through the public `AppImpl` API).
+  - *E2E*: reproduce the exact environment that triggered the bug (terminal size,
+    input sequence, etc.) and assert the observable symptom is gone.
+  Put tests in `tests/` as integration tests where possible, otherwise as a unit test
+  (with `#[cfg(test)]`) in the relevant module.
+  (See `tests/scrolling_tests.rs`, `tests/summary_tests.rs`,
+  `tests/ui_summary_truncation_tests.rs`.)
 - **Test behavior, not lines.** Aim for meaningful behavioral coverage of what the
   code should do; do not chase line-coverage metrics.
 - Run `cargo test` after every change to confirm it compiles and passes.
